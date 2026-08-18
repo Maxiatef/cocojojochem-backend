@@ -1,0 +1,220 @@
+erDiagram
+    CATEGORY ||--o{ CATEGORY : "parent/children"
+    CATEGORY ||--o{ PRODUCT : "has"
+    PRODUCT }o--|| CATEGORY : "belongs to"
+    PRODUCT ||--o{ PRODUCT_VARIANT : "has"
+    PRODUCT ||--o{ PRODUCT_IMAGE : "has"
+    PRODUCT ||--o{ PRODUCT_DOCUMENT : "has"
+    PRODUCT ||--o{ PRODUCT_SPEC : "has"
+    PRODUCT }o--o{ FUNCTION : "tagged with"
+    PRODUCT }o--o{ CERTIFICATION : "certified by"
+
+    COMPANY ||--o{ USER : "employs"
+    COMPANY ||--o{ QUOTE_REQUEST : "submits"
+
+    USER ||--o| CART : "has"
+    USER ||--o{ ORDER : "places"
+    USER ||--o{ QUOTE_REQUEST : "submits"
+
+    CART ||--o{ CART_ITEM : "contains"
+    CART_ITEM }o--|| PRODUCT_VARIANT : "references"
+
+    ORDER ||--o{ ORDER_ITEM : "contains"
+    ORDER_ITEM }o--o| PRODUCT_VARIANT : "snapshot of"
+
+    QUOTE_REQUEST ||--o{ QUOTE_REQUEST_ITEM : "contains"
+
+    CATEGORY {
+        int id PK
+        string name
+        string slug UK
+        string description
+        string imageUrl
+        int parentId FK
+        int sortOrder
+    }
+
+    FUNCTION {
+        int id PK
+        string name
+        string slug UK
+        string description
+    }
+
+    CERTIFICATION {
+        int id PK
+        string name UK
+        string iconUrl
+    }
+
+    PRODUCT {
+        int id PK
+        string name
+        string slug UK
+        string sku UK
+        string inciName
+        string botanicalName
+        string casNumber
+        text shortDescription
+        text chemicalDescriptions
+        string imageUrl
+        int categoryId FK
+        boolean isActive
+        boolean isFeatured
+        string metaTitle
+        text metaDescription
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    PRODUCT_VARIANT {
+        int id PK
+        int productId FK
+        string sku UK
+        string label
+        decimal price
+        decimal salePrice
+        datetime saleStart
+        datetime saleEnd
+        int stockQuantity
+        enum stockStatus
+        string imageUrl
+        int moq
+    }
+
+    PRODUCT_IMAGE {
+        int id PK
+        int productId FK
+        string url
+        string altText
+        int sortOrder
+    }
+
+    PRODUCT_DOCUMENT {
+        int id PK
+        int productId FK
+        enum type
+        string url
+        string label
+    }
+
+    PRODUCT_SPEC {
+        int id PK
+        int productId FK
+        string key
+        string value
+    }
+
+    COMPANY {
+        int id PK
+        string name
+        string taxId
+        string website
+        string industry
+        enum status
+        datetime createdAt
+    }
+
+    USER {
+        int id PK
+        string email UK
+        string passwordHash
+        string fullName
+        string phone
+        enum role
+        int companyId FK
+        datetime createdAt
+    }
+
+    CART {
+        int id PK
+        int userId FK
+        datetime updatedAt
+    }
+
+    CART_ITEM {
+        int id PK
+        int cartId FK
+        int productVariantId FK
+        int quantity
+        decimal price
+        decimal regularPrice
+        enum purchaseType
+        int subscriptionFrequencyMonths
+        decimal subscriptionDiscountPercent
+    }
+
+    ORDER {
+        int id PK
+        int userId FK
+        enum status
+        decimal subtotal
+        decimal total
+        text shippingAddress
+        text notes
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    ORDER_ITEM {
+        int id PK
+        int orderId FK
+        int productVariantId FK
+        string productName
+        string variantLabel
+        string sku
+        int quantity
+        decimal price
+        enum purchaseType
+    }
+
+    QUOTE_REQUEST {
+        int id PK
+        int companyId FK
+        int userId FK
+        string fullName
+        string email
+        string phone
+        string companyName
+        text message
+        enum type
+        enum status
+        int assignedToId
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    QUOTE_REQUEST_ITEM {
+        int id PK
+        int quoteRequestId FK
+        int productId
+        string productName
+        int quantity
+        string unit
+        text notes
+    }
+
+    TESTIMONIAL {
+        int id PK
+        string authorName
+        string company
+        text quote
+        string result
+        string imageUrl
+        boolean isPublished
+        int sortOrder
+    }
+
+    NEWSLETTER_SUBSCRIBER {
+        int id PK
+        string email UK
+        datetime createdAt
+    }
+
+    SEO_PAGE {
+        int id PK
+        string path UK
+        string metaTitle
+        text metaDescription
+        string ogImageUrl
+    }
