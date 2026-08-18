@@ -26,6 +26,8 @@ import {
   CouponUsage,
   BulkSaleDiscount,
   SiteSetting,
+  SeoMetric,
+  SeoIssue,
 } from './entities';
 
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -48,6 +50,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
 import { BulkSalesModule } from './modules/bulk-sales/bulk-sales.module';
 import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
+import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
 
 @Module({
   imports: [
@@ -84,6 +87,8 @@ import { SiteSettingsModule } from './modules/site-settings/site-settings.module
         CouponUsage,
         BulkSaleDiscount,
         SiteSetting,
+        SeoMetric,
+        SeoIssue,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: true,
@@ -110,6 +115,7 @@ import { SiteSettingsModule } from './modules/site-settings/site-settings.module
     BulkSalesModule,
     SeoPagesModule,
     SiteSettingsModule,
+    SeoAnalyzerModule,
   ],
 })
 export class AppModule {}

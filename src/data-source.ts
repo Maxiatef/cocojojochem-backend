@@ -28,6 +28,8 @@ import {
   CouponUsage,
   BulkSaleDiscount,
   SiteSetting,
+  SeoMetric,
+  SeoIssue,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -64,6 +66,8 @@ export const AppDataSource = new DataSource({
     CouponUsage,
     BulkSaleDiscount,
     SiteSetting,
+    SeoMetric,
+    SeoIssue,
   ],
   migrations: ['src/migrations/*.ts'],
 });

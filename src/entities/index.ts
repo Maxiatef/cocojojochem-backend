@@ -22,3 +22,5 @@ export * from './Coupon';
 export * from './CouponUsage';
 export * from './BulkSaleDiscount';
 export * from './SiteSetting';
+export * from './SeoMetric';
+export * from './SeoIssue';

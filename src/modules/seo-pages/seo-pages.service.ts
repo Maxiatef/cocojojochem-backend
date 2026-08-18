@@ -18,6 +18,11 @@ export class SeoPagesService {
     return this.seoPagesRepo.find({ order: { id: 'ASC' } });
   }
 
+  async findByPath(path: string) {
+    if (!path) return null;
+    return this.seoPagesRepo.findOne({ where: { path } });
+  }
+
   async findOne(id: number) {
     const page = await this.seoPagesRepo.findOne({ where: { id } });
     if (!page) throw new NotFoundException(`SEO page #${id} not found`);
