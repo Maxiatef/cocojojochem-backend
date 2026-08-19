@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -27,6 +28,8 @@ export class CouponsController {
   constructor(private readonly couponsService: CouponsService) {}
 
   // Public — used by the storefront cart/checkout to validate a coupon code.
+  // Rate-limited so it can't be used to brute-force guess valid codes.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('validate')
   validate(@Body() dto: ValidateCouponDto) {
     return this.couponsService.validateCoupon(dto);
