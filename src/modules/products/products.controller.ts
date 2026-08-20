@@ -13,7 +13,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { QueryProductsDto } from './dto/query-products.dto';
+import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
 
 @ApiTags('Products')
 @Controller('wholesale/products')
@@ -58,8 +58,30 @@ export class ProductsController {
     @Query('page') page = '1',
     @Query('limit') limit = '20',
     @Query('search') search?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('functionSlug') functionSlug?: string,
+    @Query('isActive') isActive?: string,
+    @Query('sort') sort?: ProductSort,
+    @Query('stockStatus') stockStatus?: string,
+    @Query('lowStock') lowStock?: string,
   ) {
-    return this.productsService.findAllAdmin(Number(page), Number(limit), search);
+    return this.productsService.findAllAdmin(
+      Number(page),
+      Number(limit),
+      search,
+      categoryId ? Number(categoryId) : undefined,
+      functionSlug,
+      isActive,
+      sort,
+      stockStatus,
+      lowStock,
+    );
+  }
+
+  // Backs the clickable status cards atop the admin Products page.
+  @Get('admin/stats')
+  getAdminStats() {
+    return this.productsService.getAdminStats();
   }
 
   // Admin lookup by numeric id — declared before ':slug' so "by-id" isn't

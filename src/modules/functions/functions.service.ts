@@ -13,14 +13,38 @@ export class FunctionsService {
   ) {}
 
   // "Shop by Chemical Function" list, each with a live product count.
-  findAll() {
-    return this.functionsRepo
+  async findAll(page = 1, limit = 50, search?: string, sort?: string) {
+    const qb = this.functionsRepo
       .createQueryBuilder('function')
       .loadRelationCountAndMap('function.productCount', 'function.products', 'product', (qb) =>
         qb.andWhere('product.isActive = true'),
-      )
-      .orderBy('function.name', 'ASC')
-      .getMany();
+      );
+
+    if (search) {
+      qb.andWhere('function.name ILIKE :search', { search: `%${search}%` });
+    }
+
+    if (sort === 'products_desc' || sort === 'products_asc') {
+      // loadRelationCountAndMap's subquery alias isn't addressable in ORDER BY, so
+      // add a second, orderable count subquery alongside it.
+      qb.addSelect((subQb) => {
+        return subQb
+          .select('COUNT(*)', 'cnt')
+          .from('product_functions', 'pf')
+          .innerJoin('products', 'p', 'p.id = pf."productId"')
+          .where('pf."functionId" = function.id')
+          .andWhere('p."isActive" = true');
+      }, 'product_count').orderBy('product_count', sort === 'products_desc' ? 'DESC' : 'ASC');
+    } else if (sort === 'name_desc') {
+      qb.orderBy('function.name', 'DESC');
+    } else {
+      qb.orderBy('function.name', 'ASC');
+    }
+
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+    return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
   async findBySlug(slug: string) {

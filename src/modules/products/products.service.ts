@@ -1,11 +1,27 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Product, ProductVariant } from '../../entities';
+import { Product, ProductImage, ProductVariant, StockStatus } from '../../entities';
 import { withPricing } from '../../common/pricing.util';
-import { CreateProductDto } from './dto/create-product.dto';
+import { CreateProductDto, CreateVariantDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { QueryProductsDto } from './dto/query-products.dto';
+import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
+
+// Quantity is the source of truth for IN_STOCK/OUT_OF_STOCK — an admin
+// shouldn't have to separately remember to flip a status dropdown after
+// zeroing out the quantity field. ON_BACKORDER is the one exception: it's a
+// deliberate merchandising choice (still sellable while restocking), so an
+// explicit stockStatus: 'ON_BACKORDER' always wins regardless of quantity.
+// Matches the dashboard overview's low-stock threshold (see dashboard.service.ts).
+const LOW_STOCK_THRESHOLD = 10;
+
+function resolveStockStatus(v: CreateVariantDto): StockStatus {
+  if (v.stockStatus === StockStatus.ON_BACKORDER) return StockStatus.ON_BACKORDER;
+  if (v.stockQuantity != null) {
+    return v.stockQuantity <= 0 ? StockStatus.OUT_OF_STOCK : StockStatus.IN_STOCK;
+  }
+  return v.stockStatus ?? StockStatus.IN_STOCK;
+}
 
 @Injectable()
 export class ProductsService {
@@ -16,6 +32,8 @@ export class ProductsService {
     private readonly productsRepo: Repository<Product>,
     @InjectRepository(ProductVariant)
     private readonly variantsRepo: Repository<ProductVariant>,
+    @InjectRepository(ProductImage)
+    private readonly galleryRepo: Repository<ProductImage>,
   ) {}
 
   private baseQuery() {
@@ -24,7 +42,8 @@ export class ProductsService {
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.variants', 'variants')
       .leftJoinAndSelect('product.functions', 'functions')
-      .leftJoinAndSelect('product.certifications', 'certifications');
+      .leftJoinAndSelect('product.certifications', 'certifications')
+      .leftJoinAndSelect('product.gallery', 'gallery');
   }
 
   // Decorates every variant with isOnSale/effectivePrice, matching the shape
@@ -109,15 +128,25 @@ export class ProductsService {
   async findById(id: number) {
     const product = await this.productsRepo.findOne({
       where: { id },
-      relations: ['category', 'variants', 'functions', 'certifications'],
+      relations: ['category', 'variants', 'functions', 'certifications', 'gallery'],
     });
     if (!product) throw new NotFoundException(`Product #${id} not found`);
     return this.decorate(product);
   }
 
-  // Admin listing: unlike findAll(), this does NOT filter to isActive-only —
+  // Admin listing: unlike findAll(), this does NOT filter to isActive-only by default —
   // the admin dashboard needs to see and manage inactive/unpublished products too.
-  async findAllAdmin(page = 1, limit = 20, search?: string) {
+  async findAllAdmin(
+    page = 1,
+    limit = 20,
+    search?: string,
+    categoryId?: number,
+    functionSlug?: string,
+    isActive?: string,
+    sort?: ProductSort,
+    stockStatus?: string,
+    lowStock?: string,
+  ) {
     const qb = this.baseQuery();
 
     if (search) {
@@ -126,10 +155,45 @@ export class ProductsService {
         { search: `%${search}%` },
       );
     }
+    if (categoryId) {
+      qb.andWhere('product.categoryId = :categoryId', { categoryId });
+    }
+    if (functionSlug) {
+      qb.andWhere('functions.slug = :functionSlug', { functionSlug });
+    }
+    if (isActive === 'true') {
+      qb.andWhere('product.isActive = true');
+    } else if (isActive === 'false') {
+      qb.andWhere('product.isActive = false');
+    }
+    if (stockStatus) {
+      qb.andWhere('variants.stockStatus = :stockStatus', { stockStatus });
+    }
+    if (lowStock === 'true') {
+      qb.andWhere('variants.stockStatus = :inStockStatus', { inStockStatus: StockStatus.IN_STOCK })
+        .andWhere('variants.stockQuantity IS NOT NULL')
+        .andWhere('variants.stockQuantity > 0')
+        .andWhere('variants.stockQuantity <= :lowStockThreshold', { lowStockThreshold: LOW_STOCK_THRESHOLD });
+    }
 
-    qb.orderBy('product.name', 'ASC')
-      .skip((page - 1) * limit)
-      .take(limit);
+    switch (sort) {
+      case 'name_desc':
+        qb.orderBy('product.name', 'DESC');
+        break;
+      case 'price_asc':
+        qb.orderBy('variants.price', 'ASC');
+        break;
+      case 'price_desc':
+        qb.orderBy('variants.price', 'DESC');
+        break;
+      case 'newest':
+        qb.orderBy('product.createdAt', 'DESC');
+        break;
+      default:
+        qb.orderBy('product.name', 'ASC');
+    }
+
+    qb.skip((page - 1) * limit).take(limit);
 
     const [data, total] = await qb.getManyAndCount();
     return {
@@ -143,6 +207,32 @@ export class ProductsService {
         hasPrev: page > 1,
       },
     };
+  }
+
+  // Backs the clickable status cards atop the admin Products page — each
+  // count here corresponds 1:1 to a `stockStatus`/`isActive`/`lowStock`
+  // filter combination `findAllAdmin` accepts, so clicking a card is just
+  // "call findAllAdmin with these params" on the frontend.
+  async getAdminStats() {
+    const [total, active, inactive, outOfStock, onBackorder, lowStock] = await Promise.all([
+      this.productsRepo.count(),
+      this.productsRepo.count({ where: { isActive: true } }),
+      this.productsRepo.count({ where: { isActive: false } }),
+      this.baseQuery()
+        .andWhere('variants.stockStatus = :status', { status: StockStatus.OUT_OF_STOCK })
+        .getCount(),
+      this.baseQuery()
+        .andWhere('variants.stockStatus = :status', { status: StockStatus.ON_BACKORDER })
+        .getCount(),
+      this.baseQuery()
+        .andWhere('variants.stockStatus = :status', { status: StockStatus.IN_STOCK })
+        .andWhere('variants.stockQuantity IS NOT NULL')
+        .andWhere('variants.stockQuantity > 0')
+        .andWhere('variants.stockQuantity <= :threshold', { threshold: LOW_STOCK_THRESHOLD })
+        .getCount(),
+    ]);
+
+    return { total, active, inactive, outOfStock, onBackorder, lowStock };
   }
 
   async findBySlug(slug: string) {
@@ -268,9 +358,14 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto) {
-    const { variants, functionIds, certificationIds, ...productData } = dto;
+    const { variants, functionIds, certificationIds, gallery, ...productData } = dto;
     const product = this.productsRepo.create({
       ...productData,
+      // Single unified image list from the admin's perspective: whichever
+      // image is first in `gallery` is the "cover"/main image. `imageUrl`
+      // stays as a real column (every other page/query already reads it
+      // directly) but is now always derived, never set independently.
+      imageUrl: gallery && gallery.length > 0 ? gallery[0].url : productData.imageUrl,
       functions: functionIds?.map((id) => ({ id })) as any,
       certifications: certificationIds?.map((id) => ({ id })) as any,
       variants: variants.map((v) =>
@@ -278,6 +373,14 @@ export class ProductsService {
           ...v,
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
+          stockStatus: resolveStockStatus(v),
+        }),
+      ),
+      gallery: gallery?.map((g, i) =>
+        this.galleryRepo.create({
+          url: g.url,
+          altText: g.altText ?? null,
+          sortOrder: g.sortOrder ?? i,
         }),
       ),
     });
@@ -287,10 +390,14 @@ export class ProductsService {
   }
 
   async update(id: number, dto: UpdateProductDto) {
-    const { variants, functionIds, certificationIds, ...productData } = dto;
+    const { variants, functionIds, certificationIds, gallery, ...productData } = dto;
     const product = await this.productsRepo.preload({
       id,
       ...productData,
+      // Same derivation as create(): the first gallery image is always the
+      // cover/main image. An explicitly-sent empty gallery ([]) clears the
+      // cover back to null rather than leaving a stale imageUrl behind.
+      ...(gallery ? { imageUrl: gallery.length > 0 ? gallery[0].url : null } : {}),
       ...(functionIds ? { functions: functionIds.map((fid) => ({ id: fid })) as any } : {}),
       ...(certificationIds
         ? { certifications: certificationIds.map((cid) => ({ id: cid })) as any }
@@ -309,9 +416,24 @@ export class ProductsService {
           productId: id,
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
+          stockStatus: resolveStockStatus(v),
         }),
       );
       await this.variantsRepo.save(newVariants);
+    }
+
+    // Same delete-then-recreate approach as variants above.
+    if (gallery) {
+      await this.galleryRepo.delete({ productId: id });
+      const newGallery = gallery.map((g, i) =>
+        this.galleryRepo.create({
+          productId: id,
+          url: g.url,
+          altText: g.altText ?? null,
+          sortOrder: g.sortOrder ?? i,
+        }),
+      );
+      await this.galleryRepo.save(newGallery);
     }
 
     this.logger.log(`Product updated: "${saved.name}" (id=${saved.id})`);

@@ -45,8 +45,13 @@ export class FunctionsController {
   constructor(private readonly functionsService: FunctionsService) {}
 
   @Get()
-  findAll() {
-    return this.functionsService.findAll();
+  findAll(
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.functionsService.findAll(Number(page), Number(limit), search, sort);
   }
 
   @Get(':slug')

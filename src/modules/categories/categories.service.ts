@@ -17,19 +17,40 @@ export class CategoriesService {
   ) {}
 
   // Mirrors the live cocojojo.com shape: each category carries its own live product count.
-  async findAll(page = 1, limit = 50) {
-    const [data, total] = await this.categoriesRepo
+  async findAll(page = 1, limit = 50, search?: string, sort?: string) {
+    const qb = this.categoriesRepo
       .createQueryBuilder('category')
       .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
         qb.andWhere('product.isActive = true'),
-      )
-      .orderBy('category.sortOrder', 'ASC')
-      .addOrderBy('category.name', 'ASC')
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
+      );
 
-    return { data, pagination: { total, page, limit } };
+    if (search) {
+      qb.andWhere('category.name ILIKE :search', { search: `%${search}%` });
+    }
+
+    if (sort === 'products_desc' || sort === 'products_asc') {
+      // loadRelationCountAndMap's subquery alias isn't addressable in ORDER BY, so
+      // add a second, orderable count subquery alongside it.
+      qb.addSelect((subQb) => {
+        return subQb
+          .select('COUNT(*)', 'cnt')
+          .from('products', 'p')
+          .where('p."categoryId" = category.id')
+          .andWhere('p."isActive" = true');
+      }, 'product_count').orderBy('product_count', sort === 'products_desc' ? 'DESC' : 'ASC');
+    } else if (sort === 'name_desc') {
+      qb.orderBy('category.name', 'DESC');
+    } else if (sort === 'name_asc') {
+      qb.orderBy('category.name', 'ASC');
+    } else {
+      qb.orderBy('category.sortOrder', 'ASC').addOrderBy('category.name', 'ASC');
+    }
+
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
   // Nested parent/children tree, e.g. Acids -> Amino Acids, for a sidebar/menu view.

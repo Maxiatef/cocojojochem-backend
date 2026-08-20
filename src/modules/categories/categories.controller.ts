@@ -20,8 +20,13 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get()
-  findAll(@Query('page') page = '1', @Query('limit') limit = '50') {
-    return this.categoriesService.findAll(Number(page), Number(limit));
+  findAll(
+    @Query('page') page = '1',
+    @Query('limit') limit = '50',
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.categoriesService.findAll(Number(page), Number(limit), search, sort);
   }
 
   // Nested parent/children tree for menus/sidebars
