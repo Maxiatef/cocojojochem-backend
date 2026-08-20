@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -11,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { CompaniesService } from '../companies/companies.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AccountStatus, UserRole } from '../../entities';
 
 @Injectable()
@@ -71,6 +73,29 @@ export class AuthService {
       `User logged in: ${user.email} (id=${user.id}, role=${user.role}) — token valid for ${expiresIn}`,
     );
     return this.buildToken(user.id, user.email, user.role);
+  }
+
+  async changePassword(userId: number, dto: ChangePasswordDto) {
+    const user = await this.usersService.findById(userId);
+    if (!user.passwordHash) {
+      throw new BadRequestException('This account has no password set');
+    }
+
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) {
+      this.logger.warn(`Password change rejected — incorrect current password for user #${userId}`);
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const sameAsBefore = await bcrypt.compare(dto.newPassword, user.passwordHash);
+    if (sameAsBefore) {
+      throw new BadRequestException('New password must be different from the current password');
+    }
+
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await this.usersService.save(user);
+    this.logger.log(`Password changed for user #${userId} (${user.email})`);
+    return { success: true };
   }
 
   private buildToken(sub: number, email: string, role: string) {

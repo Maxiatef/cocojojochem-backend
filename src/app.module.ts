@@ -48,7 +48,15 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ContactMessagesModule } from './modules/contact-messages/contact-messages.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { BulkSalesModule } from './modules/bulk-sales/bulk-sales.module';
-import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
+// SeoPagesModule is disabled — no admin UI edits SeoPage rows anymore (the
+// Meta Tags editor tab on /admin/seo was removed). Left commented, not
+// deleted, so it can be re-enabled later. Note: with this commented out,
+// `GET /seo-pages/by-path` 404s, and the storefront's generateMetadata()
+// calls on /, /products, /categories, /functions, /a-z gracefully fall back
+// to their hardcoded default titles/descriptions (serverFetch treats a
+// non-ok response as "no override" rather than throwing) — any previously
+// saved per-path overrides simply stop applying until this is uncommented.
+// import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
 
@@ -113,7 +121,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     ContactMessagesModule,
     CouponsModule,
     BulkSalesModule,
-    SeoPagesModule,
+    // SeoPagesModule, // disabled — see comment above the import
     SiteSettingsModule,
     SeoAnalyzerModule,
   ],

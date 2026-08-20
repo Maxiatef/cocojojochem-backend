@@ -36,6 +36,10 @@ export class UsersService {
     return this.usersRepo.save(user);
   }
 
+  save(user: User) {
+    return this.usersRepo.save(user);
+  }
+
   // Admin list — all users regardless of role, with company name, order count, and total spent.
   async findAllAdmin(query: QueryUsersDto) {
     const page = Number(query.page) || 1;

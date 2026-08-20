@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order, OrderStatus } from '../../entities';
+import { computeAdvancedOrderStatus } from '../orders/orders.service';
+import { OrdersService } from '../orders/orders.service';
 
 /**
  * Listeners for Stripe / ShipStation / Shippo webhook events.
@@ -30,6 +32,7 @@ export class WebhooksService {
   constructor(
     @InjectRepository(Order)
     private readonly ordersRepo: Repository<Order>,
+    private readonly ordersService: OrdersService,
   ) {}
 
   async handleStripeEvent(event: any) {
@@ -51,6 +54,19 @@ export class WebhooksService {
       order.status = OrderStatus.PROCESSING;
       await this.ordersRepo.save(order);
       this.logger.log(`Order #${order.id} moved to PROCESSING after Stripe payment capture.`);
+
+      // Mirrors the real site's flow: Stripe payment success triggers Shippo
+      // shipment creation right in the webhook handler. Best-effort — a
+      // shipping-side failure must never break Stripe webhook acknowledgment,
+      // and createShipmentForOrder already no-ops/catches internally, but we
+      // guard here too in case of an unexpected error (e.g. DB issue).
+      try {
+        await this.ordersService.createShipmentForOrder(order.id);
+      } catch (err) {
+        this.logger.warn(
+          `Auto shipment creation threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
     } else if (event.type === 'payment_intent.payment_failed') {
       this.logger.warn(`Payment failed for order #${order.id} (Stripe payment intent ${paymentIntentId}).`);
     }
@@ -102,16 +118,17 @@ export class WebhooksService {
 
     // Unlike the real site (whose enum collapses everything post-shipment
     // into SHIPPED), ours has a distinct DELIVERED status — map Shippo's
-    // tracking states onto both.
-    let nextStatus: OrderStatus | null = null;
-    if (trackingStatus === 'DELIVERED') nextStatus = OrderStatus.DELIVERED;
-    else if (['TRANSIT', 'OUT_FOR_DELIVERY', 'PICKUP'].includes(trackingStatus)) nextStatus = OrderStatus.SHIPPED;
-    // PRE_TRANSIT (label created, not yet moving), RETURNED, FAILURE, UNKNOWN: leave status as-is.
+    // tracking states onto both. Uses the same pure, forward-only mapping
+    // as OrdersService.getTrackingCheckpoints so both code paths agree on
+    // which Shippo statuses advance an order and never let a stale/older
+    // webhook downgrade an order that has already reached a later status.
+    const nextStatus = computeAdvancedOrderStatus(order.status, trackingStatus);
 
-    if (nextStatus && order.status !== nextStatus) {
+    if (nextStatus) {
+      const previousStatus = order.status;
       order.status = nextStatus;
       await this.ordersRepo.save(order);
-      this.logger.log(`Order #${order.id} marked ${nextStatus} via Shippo tracking update (${trackingStatus}).`);
+      this.logger.log(`Order #${order.id} marked ${nextStatus} via Shippo tracking update (${trackingStatus}), was ${previousStatus}.`);
     }
 
     return { received: true };

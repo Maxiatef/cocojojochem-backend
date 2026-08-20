@@ -19,6 +19,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { OrdersService } from './orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { UpdateTrackingDto } from './dto/update-tracking.dto';
 
 class UpdateOrderStatusDto {
   @IsEnum(OrderStatus)
@@ -48,6 +49,31 @@ export class OrdersController {
   @Roles(UserRole.ADMIN, UserRole.SALES)
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto.status);
+  }
+
+  @Patch(':id/tracking')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
+  updateTracking(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTrackingDto) {
+    return this.ordersService.updateTracking(id, dto);
+  }
+
+  // Admin/sales: live tracking lookup for any order, no ownership check.
+  @Get(':id/tracking/admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
+  getTrackingAdmin(@Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.getTrackingCheckpoints(id);
+  }
+
+  // Customer: live tracking lookup, restricted to the order's own owner.
+  @Get(':id/tracking')
+  @UseGuards(JwtAuthGuard)
+  async getTracking(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    // Reuses findOne's ownership check (throws NotFoundException if the order
+    // doesn't belong to this user) before doing the live lookup.
+    await this.ordersService.findOne(req.user.id, id);
+    return this.ordersService.getTrackingCheckpoints(id);
   }
 
   @Get()
