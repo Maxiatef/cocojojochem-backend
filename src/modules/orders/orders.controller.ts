@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { IsEnum } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { OrderStatus, UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -88,6 +89,9 @@ export class OrdersController {
     return this.ordersService.findOne(req.user.id, id);
   }
 
+  // Unauthenticated by design (guest checkout) — the endpoint most exposed to
+  // order-spam/card-testing bots, so it gets its own tight limit.
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
   @Post('checkout')
   @UseGuards(OptionalJwtAuthGuard)
   checkout(@Req() req: any, @Body() dto: CheckoutDto) {

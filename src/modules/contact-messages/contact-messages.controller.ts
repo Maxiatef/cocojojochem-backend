@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { ContactMessageStatus, UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -24,7 +25,9 @@ class SetRepliedDto {
 export class ContactMessagesController {
   constructor(private readonly contactMessagesService: ContactMessagesService) {}
 
-  // Public — this is the storefront "Contact Us" form
+  // Public — this is the storefront "Contact Us" form. Rate-limited against
+  // spam submissions.
+  @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @Post()
   create(@Body() dto: CreateContactMessageDto) {
     return this.contactMessagesService.create(dto);
