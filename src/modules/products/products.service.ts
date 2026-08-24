@@ -201,7 +201,9 @@ export class ProductsService {
       qb.andWhere('variants.stockStatus = :inStockStatus', { inStockStatus: StockStatus.IN_STOCK })
         .andWhere('variants.stockQuantity IS NOT NULL')
         .andWhere('variants.stockQuantity > 0')
-        .andWhere('variants.stockQuantity <= :lowStockThreshold', { lowStockThreshold: LOW_STOCK_THRESHOLD });
+        .andWhere('variants.stockQuantity <= COALESCE(variants.lowStockThreshold, :defaultThreshold)', {
+          defaultThreshold: LOW_STOCK_THRESHOLD,
+        });
     }
 
     switch (sort) {
@@ -256,7 +258,9 @@ export class ProductsService {
         .andWhere('variants.stockStatus = :status', { status: StockStatus.IN_STOCK })
         .andWhere('variants.stockQuantity IS NOT NULL')
         .andWhere('variants.stockQuantity > 0')
-        .andWhere('variants.stockQuantity <= :threshold', { threshold: LOW_STOCK_THRESHOLD })
+        .andWhere('variants.stockQuantity <= COALESCE(variants.lowStockThreshold, :threshold)', {
+          threshold: LOW_STOCK_THRESHOLD,
+        })
         .getCount(),
     ]);
 

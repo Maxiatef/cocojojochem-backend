@@ -199,6 +199,36 @@ export class OrdersService {
     return { couponId: result.coupon.id, couponAmount: result.discountAmount || 0 };
   }
 
+  // Server-side re-validation of the per-variant order limit
+  // (limitPerOrder + maxOrderQuantity) — never trust the cart alone, since a
+  // race condition or a direct API call could bypass CartService's check.
+  // Sums quantities per variant across all line items before comparing,
+  // matching the cumulative enforcement used in cart.service.ts.
+  private assertOrderLimits(
+    lines: { variant: ProductVariant; productName: string; quantity: number }[],
+  ) {
+    const totalsByVariant = new Map<number, number>();
+    for (const line of lines) {
+      totalsByVariant.set(
+        line.variant.id,
+        (totalsByVariant.get(line.variant.id) || 0) + line.quantity,
+      );
+    }
+    const seen = new Set<number>();
+    for (const line of lines) {
+      const { variant, productName } = line;
+      if (seen.has(variant.id)) continue;
+      seen.add(variant.id);
+      if (!variant.limitPerOrder || variant.maxOrderQuantity == null) continue;
+      const total = totalsByVariant.get(variant.id) || 0;
+      if (total > variant.maxOrderQuantity) {
+        throw new BadRequestException(
+          `${productName} (${variant.label}) is limited to ${variant.maxOrderQuantity} units per order. Please reduce the quantity and try again.`,
+        );
+      }
+    }
+  }
+
   findAllForUser(userId: number) {
     return this.ordersRepo.find({
       where: { userId },
@@ -224,7 +254,17 @@ export class OrdersService {
         where: { userId },
         relations: ['items', 'items.variant', 'items.variant.product'],
       });
-      if (!cart || cart.items.length === 0) throw new BadRequestException('Cart is empty');
+      if (!cart || cart.items.length === 0) {
+        throw new BadRequestException('Your cart is empty — add some items before checking out.');
+      }
+
+      this.assertOrderLimits(
+        cart.items.map((item) => ({
+          variant: item.variant,
+          productName: item.variant.product?.name || item.variant.label,
+          quantity: item.quantity,
+        })),
+      );
 
       const orderItems = cart.items.map((item) =>
         this.orderItemsRepo.create({
@@ -291,6 +331,25 @@ export class OrdersService {
       relations: ['product'],
     });
     const variantsById = new Map(variants.map((v) => [v.id, v]));
+
+    for (const reqItem of dto.items) {
+      if (!variantsById.has(reqItem.productVariantId)) {
+        throw new BadRequestException(
+          `One of the items in your cart (variant #${reqItem.productVariantId}) is no longer available. Please remove it and try again.`,
+        );
+      }
+    }
+
+    this.assertOrderLimits(
+      dto.items.map((reqItem) => {
+        const variant = variantsById.get(reqItem.productVariantId)!;
+        return {
+          variant,
+          productName: variant.product?.name || variant.label,
+          quantity: reqItem.quantity,
+        };
+      }),
+    );
 
     const orderItems = dto.items.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId);

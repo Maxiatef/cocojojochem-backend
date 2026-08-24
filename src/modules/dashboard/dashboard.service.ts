@@ -104,7 +104,9 @@ export class DashboardService {
         .where('variant.stockStatus = :status', { status: 'IN_STOCK' })
         .andWhere('variant.stockQuantity IS NOT NULL')
         .andWhere('variant.stockQuantity > 0')
-        .andWhere('variant.stockQuantity <= :threshold', { threshold: LOW_STOCK_THRESHOLD })
+        .andWhere('variant.stockQuantity <= COALESCE(variant.lowStockThreshold, :threshold)', {
+          threshold: LOW_STOCK_THRESHOLD,
+        })
         .getCount(),
       // We also report the actual list (capped at 10), not just a count, so
       // the overview card is directly actionable rather than a number the
@@ -122,7 +124,9 @@ export class DashboardService {
         .where('variant.stockStatus = :status', { status: 'IN_STOCK' })
         .andWhere('variant.stockQuantity IS NOT NULL')
         .andWhere('variant.stockQuantity > 0')
-        .andWhere('variant.stockQuantity <= :threshold', { threshold: LOW_STOCK_THRESHOLD })
+        .andWhere('variant.stockQuantity <= COALESCE(variant.lowStockThreshold, :threshold)', {
+          threshold: LOW_STOCK_THRESHOLD,
+        })
         .orderBy('variant.stockQuantity', 'ASC')
         .limit(10)
         .getRawMany(),

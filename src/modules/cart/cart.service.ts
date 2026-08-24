@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cart, CartItem, ProductVariant, PurchaseType } from '../../entities';
@@ -30,10 +30,53 @@ export class CartService {
     return this.getOrCreateCart(userId);
   }
 
+  // Sums quantity already in the cart for a given variant, across all cart
+  // items (not just one row) — the order limit applies cumulatively per
+  // variant, not per line item. `excludeItemId` lets updateItemQuantity
+  // recompute "everything else in the cart" before adding the new quantity.
+  private quantityAlreadyInCart(cart: Cart, variantId: number, excludeItemId?: number): number {
+    return cart.items
+      .filter((i) => i.productVariantId === variantId && i.id !== excludeItemId)
+      .reduce((sum, i) => sum + i.quantity, 0);
+  }
+
+  // Enforces the per-variant order limit (limitPerOrder + maxOrderQuantity)
+  // cumulatively across the whole cart for that variant, not per line item.
+  private assertWithinOrderLimit(
+    variant: ProductVariant,
+    productName: string | undefined,
+    alreadyInCart: number,
+    requestedTotal: number,
+  ) {
+    if (!variant.limitPerOrder || variant.maxOrderQuantity == null) return;
+    if (requestedTotal <= variant.maxOrderQuantity) return;
+
+    const remaining = Math.max(variant.maxOrderQuantity - alreadyInCart, 0);
+    const label = productName ? `${productName} (${variant.label})` : variant.label;
+    if (alreadyInCart > 0) {
+      throw new BadRequestException(
+        `Only ${variant.maxOrderQuantity} units of ${label} can be ordered at a time. You already have ${alreadyInCart} in your cart — you can add up to ${remaining} more.`,
+      );
+    }
+    throw new BadRequestException(
+      `Only ${variant.maxOrderQuantity} units of ${label} can be ordered at a time. Please reduce the quantity and try again.`,
+    );
+  }
+
   async addItem(userId: number, dto: AddCartItemDto) {
     const cart = await this.getOrCreateCart(userId);
-    const variant = await this.variantRepo.findOne({ where: { id: dto.productVariantId } });
-    if (!variant) throw new NotFoundException(`Variant #${dto.productVariantId} not found`);
+    const variant = await this.variantRepo.findOne({
+      where: { id: dto.productVariantId },
+      relations: ['product'],
+    });
+    if (!variant) {
+      throw new NotFoundException(
+        `We couldn't find that product variant (#${dto.productVariantId}). It may have been removed — please refresh and try again.`,
+      );
+    }
+
+    const alreadyInCart = this.quantityAlreadyInCart(cart, variant.id);
+    this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + dto.quantity);
 
     const item = this.cartItemRepo.create({
       cartId: cart.id,
@@ -49,7 +92,19 @@ export class CartService {
   async updateItemQuantity(userId: number, itemId: number, quantity: number) {
     const cart = await this.getOrCreateCart(userId);
     const item = cart.items.find((i) => i.id === itemId);
-    if (!item) throw new NotFoundException(`Cart item #${itemId} not found`);
+    if (!item) {
+      throw new NotFoundException(
+        `This cart item no longer exists — it may have already been removed. Please refresh your cart.`,
+      );
+    }
+
+    const variant =
+      item.variant ?? (await this.variantRepo.findOne({ where: { id: item.productVariantId }, relations: ['product'] }));
+    if (variant) {
+      const alreadyInCart = this.quantityAlreadyInCart(cart, item.productVariantId, item.id);
+      this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + quantity);
+    }
+
     item.quantity = quantity;
     return this.cartItemRepo.save(item);
   }
@@ -57,7 +112,11 @@ export class CartService {
   async removeItem(userId: number, itemId: number) {
     const cart = await this.getOrCreateCart(userId);
     const item = cart.items.find((i) => i.id === itemId);
-    if (!item) throw new NotFoundException(`Cart item #${itemId} not found`);
+    if (!item) {
+      throw new NotFoundException(
+        `This cart item no longer exists — it may have already been removed. Please refresh your cart.`,
+      );
+    }
     return this.cartItemRepo.remove(item);
   }
 
@@ -81,7 +140,17 @@ export class CartService {
         (i) => i.productVariantId === guestItem.productVariantId,
       );
       if (existing) {
-        existing.quantity += guestItem.quantity;
+        // Clamp (rather than throw) when merging on login — a login shouldn't
+        // hard-fail because a guest cart plus server cart happen to exceed a
+        // variant's per-order limit; cap at the limit instead.
+        const variant =
+          existing.variant ??
+          (await this.variantRepo.findOne({ where: { id: existing.productVariantId } }));
+        const desired = existing.quantity + guestItem.quantity;
+        existing.quantity =
+          variant?.limitPerOrder && variant.maxOrderQuantity != null
+            ? Math.min(desired, variant.maxOrderQuantity)
+            : desired;
         await this.cartItemRepo.save(existing);
       } else {
         await this.addItem(userId, guestItem);

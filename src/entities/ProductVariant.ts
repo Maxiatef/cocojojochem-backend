@@ -60,6 +60,23 @@ export class ProductVariant {
   @Column({ type: 'int', nullable: true })
   moq: number | null;
 
+  // Per-variant override for the global LOW_STOCK_THRESHOLD (10) — when set,
+  // this variant is considered "running low" at this quantity instead of the
+  // global default. See resolveStockStatus() usages in products.service.ts
+  // and dashboard.service.ts.
+  @Column({ type: 'int', nullable: true })
+  lowStockThreshold: number | null;
+
+  // Custom (non-WooCommerce) per-variant order cap: when true and
+  // maxOrderQuantity is set, a single order/cart cannot contain more than
+  // maxOrderQuantity units of this variant. Enforced in cart.service.ts and
+  // orders.service.ts.
+  @Column({ type: 'boolean', default: false })
+  limitPerOrder: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  maxOrderQuantity: number | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { StockStatus, ProductVisibility } from '../../../entities';
@@ -44,6 +45,23 @@ export class CreateVariantDto {
   @IsOptional()
   @IsInt()
   moq?: number;
+
+  // Per-variant override for the global low-stock threshold (10). When set,
+  // this variant is flagged "running low" at this quantity instead.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  lowStockThreshold?: number;
+
+  // Custom per-variant order cap (not WooCommerce's "sold individually").
+  @IsOptional()
+  @IsBoolean()
+  limitPerOrder?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxOrderQuantity?: number;
 }
 
 export class GalleryImageDto {
