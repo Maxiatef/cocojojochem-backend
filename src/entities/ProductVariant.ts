@@ -77,6 +77,14 @@ export class ProductVariant {
   @Column({ type: 'int', nullable: true })
   maxOrderQuantity: number | null;
 
+  // When set to a future date, the product/variant stays fully visible and
+  // browsable (name, images, price, description) but cannot be added to cart
+  // or checked out until this date arrives — a "coming soon, viewable now"
+  // state, distinct from Product.scheduledPublishAt which hides the product
+  // entirely. Checked at request time (cart add/update, checkout) — no cron.
+  @Column({ type: 'timestamptz', nullable: true })
+  availableFrom: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

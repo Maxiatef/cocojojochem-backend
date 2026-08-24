@@ -229,6 +229,27 @@ export class OrdersService {
     }
   }
 
+  // Server-side re-validation of availableFrom — a variant stays browsable on
+  // the storefront but can't actually be purchased before this date. Never
+  // trust the cart alone, since a race condition or a direct API call could
+  // bypass CartService's check.
+  private assertAvailability(
+    lines: { variant: ProductVariant; productName: string; quantity: number }[],
+  ) {
+    const now = new Date();
+    for (const { variant, productName } of lines) {
+      if (!variant.availableFrom || variant.availableFrom <= now) continue;
+      const when = variant.availableFrom.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      throw new BadRequestException(
+        `${productName} (${variant.label}) isn't available for purchase yet — it becomes available on ${when}.`,
+      );
+    }
+  }
+
   findAllForUser(userId: number) {
     return this.ordersRepo.find({
       where: { userId },
@@ -258,13 +279,13 @@ export class OrdersService {
         throw new BadRequestException('Your cart is empty — add some items before checking out.');
       }
 
-      this.assertOrderLimits(
-        cart.items.map((item) => ({
-          variant: item.variant,
-          productName: item.variant.product?.name || item.variant.label,
-          quantity: item.quantity,
-        })),
-      );
+      const cartLines = cart.items.map((item) => ({
+        variant: item.variant,
+        productName: item.variant.product?.name || item.variant.label,
+        quantity: item.quantity,
+      }));
+      this.assertAvailability(cartLines);
+      this.assertOrderLimits(cartLines);
 
       const orderItems = cart.items.map((item) =>
         this.orderItemsRepo.create({
@@ -340,16 +361,16 @@ export class OrdersService {
       }
     }
 
-    this.assertOrderLimits(
-      dto.items.map((reqItem) => {
-        const variant = variantsById.get(reqItem.productVariantId)!;
-        return {
-          variant,
-          productName: variant.product?.name || variant.label,
-          quantity: reqItem.quantity,
-        };
-      }),
-    );
+    const guestLines = dto.items.map((reqItem) => {
+      const variant = variantsById.get(reqItem.productVariantId)!;
+      return {
+        variant,
+        productName: variant.product?.name || variant.label,
+        quantity: reqItem.quantity,
+      };
+    });
+    this.assertAvailability(guestLines);
+    this.assertOrderLimits(guestLines);
 
     const orderItems = dto.items.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId);

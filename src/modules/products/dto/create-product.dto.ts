@@ -62,6 +62,12 @@ export class CreateVariantDto {
   @IsInt()
   @Min(1)
   maxOrderQuantity?: number;
+
+  // Visible/browsable immediately regardless; blocks add-to-cart/checkout for
+  // THIS variant until this date arrives. Omit/null = available immediately.
+  @IsOptional()
+  @IsDateString()
+  availableFrom?: string;
 }
 
 export class GalleryImageDto {

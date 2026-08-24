@@ -63,6 +63,19 @@ export class CartService {
     );
   }
 
+  // Variant stays fully visible/browsable on the storefront regardless — this
+  // only blocks the purchase action itself until availableFrom arrives.
+  private assertAvailable(variant: ProductVariant, productName?: string) {
+    if (!variant.availableFrom || variant.availableFrom <= new Date()) return;
+    const label = productName ? `${productName} (${variant.label})` : variant.label;
+    const when = variant.availableFrom.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    throw new BadRequestException(`${label} isn't available for purchase yet — it becomes available on ${when}.`);
+  }
+
   async addItem(userId: number, dto: AddCartItemDto) {
     const cart = await this.getOrCreateCart(userId);
     const variant = await this.variantRepo.findOne({
@@ -74,6 +87,8 @@ export class CartService {
         `We couldn't find that product variant (#${dto.productVariantId}). It may have been removed — please refresh and try again.`,
       );
     }
+
+    this.assertAvailable(variant, variant.product?.name);
 
     const alreadyInCart = this.quantityAlreadyInCart(cart, variant.id);
     this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + dto.quantity);
@@ -101,6 +116,7 @@ export class CartService {
     const variant =
       item.variant ?? (await this.variantRepo.findOne({ where: { id: item.productVariantId }, relations: ['product'] }));
     if (variant) {
+      this.assertAvailable(variant, variant.product?.name);
       const alreadyInCart = this.quantityAlreadyInCart(cart, item.productVariantId, item.id);
       this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + quantity);
     }

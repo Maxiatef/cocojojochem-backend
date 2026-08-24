@@ -23,6 +23,24 @@ import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
 // Matches the dashboard overview's low-stock threshold (see dashboard.service.ts).
 const LOW_STOCK_THRESHOLD = 10;
 
+// Scheduling forces the real status, matching WordPress's "future post"
+// behavior: a product with a future scheduledPublishAt is ALWAYS treated as
+// Draft regardless of whatever the admin's Published/Draft toggle says, and
+// a scheduledPublishAt that's already in the past (or now) publishes
+// immediately and clears the schedule. Returns `{}` (no override) when
+// scheduledPublishAt wasn't part of this request at all.
+function resolveScheduleFields(
+  rawScheduledPublishAt: string | undefined,
+): Partial<Pick<Product, 'isPublished' | 'scheduledPublishAt'>> {
+  if (rawScheduledPublishAt === undefined) return {};
+  if (!rawScheduledPublishAt) return { scheduledPublishAt: null };
+  const date = new Date(rawScheduledPublishAt);
+  if (date > new Date()) {
+    return { isPublished: false, scheduledPublishAt: date };
+  }
+  return { isPublished: true, scheduledPublishAt: null };
+}
+
 function resolveStockStatus(v: CreateVariantDto): StockStatus {
   if (v.stockStatus === StockStatus.ON_BACKORDER) return StockStatus.ON_BACKORDER;
   if (v.stockQuantity != null) {
@@ -60,6 +78,17 @@ export class ProductsService {
       .leftJoinAndSelect('product.seo', 'seo');
   }
 
+  // Lazily flips any product whose scheduled publish time has arrived from
+  // Draft to Published — no cron job needed, this just runs at the top of
+  // every read path so the transition happens the moment anyone (admin or
+  // storefront) next looks, which is effectively instant in practice.
+  private async autoPublishDueSchedules(): Promise<void> {
+    await this.productsRepo.query(
+      `UPDATE products SET "isPublished" = true, "scheduledPublishAt" = NULL
+       WHERE "scheduledPublishAt" IS NOT NULL AND "scheduledPublishAt" <= NOW()`,
+    );
+  }
+
   // Public visibility gate — applied on top of baseQuery() for every
   // public-facing (non-admin) query. A product must be published, not
   // scheduled for the future, and PUBLIC visibility. PASSWORD_PROTECTED
@@ -85,6 +114,7 @@ export class ProductsService {
   }
 
   async findAll(query: QueryProductsDto) {
+    await this.autoPublishDueSchedules();
     const page = query.page || 1;
     const limit = query.limit || 20;
 
@@ -154,6 +184,7 @@ export class ProductsService {
   // by the admin edit form, which has the id from the list but not the slug's
   // canonical form needed to round-trip safely if the slug itself is edited.
   async findById(id: number) {
+    await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
       where: { id },
       relations: ['category', 'variants', 'functions', 'certifications', 'gallery', 'specs', 'seo'],
@@ -175,6 +206,7 @@ export class ProductsService {
     stockStatus?: string,
     lowStock?: string,
   ) {
+    await this.autoPublishDueSchedules();
     const qb = this.baseQuery();
 
     if (search) {
@@ -244,6 +276,7 @@ export class ProductsService {
   // filter combination `findAllAdmin` accepts, so clicking a card is just
   // "call findAllAdmin with these params" on the frontend.
   async getAdminStats() {
+    await this.autoPublishDueSchedules();
     const [total, active, inactive, outOfStock, onBackorder, lowStock] = await Promise.all([
       this.productsRepo.count(),
       this.productsRepo.count({ where: { isPublished: true } }),
@@ -268,6 +301,7 @@ export class ProductsService {
   }
 
   async findBySlug(slug: string, password?: string) {
+    await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
       where: { slug },
       relations: [
@@ -307,6 +341,7 @@ export class ProductsService {
   }
 
   async findFeatured(limit = 12) {
+    await this.autoPublishDueSchedules();
     const products = await this.applyPublicVisibility(this.baseQuery())
       .andWhere('product.isFeatured = true')
       .take(limit)
@@ -317,6 +352,7 @@ export class ProductsService {
   // Related products: same category first, then products sharing at least one
   // function tag — useful for the "you may also need" panel on a product page.
   async findRelated(slug: string, limit = 8) {
+    await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
       where: { slug },
       relations: ['functions'],
@@ -343,6 +379,7 @@ export class ProductsService {
   // across the same fields, and an exact/prefix/contains match bonus ladder so
   // a literal SKU or name hit always outranks a fuzzy one.
   async search(query: string, categoryId?: number, page = 1, limit = 20) {
+    await this.autoPublishDueSchedules();
     const offset = (page - 1) * limit;
     const params: any[] = [query, query];
     let categoryFilter = '';
@@ -396,6 +433,7 @@ export class ProductsService {
 
   // A-Z index: products grouped by first letter, matching cocojojo.com's alphabetical browse.
   async findAZIndex() {
+    await this.autoPublishDueSchedules();
     const products = await this.applyPublicVisibility(
       this.productsRepo
         .createQueryBuilder('product')
@@ -417,7 +455,9 @@ export class ProductsService {
     const { variants, functionIds, certificationIds, gallery, specs, seo, scheduledPublishAt, ...productData } = dto;
     const product = this.productsRepo.create({
       ...productData,
-      scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null,
+      // Overrides productData.isPublished: a future schedule always forces
+      // Draft, a past/present one publishes immediately and clears itself.
+      ...resolveScheduleFields(scheduledPublishAt),
       // Single unified image list from the admin's perspective: whichever
       // image is first in `gallery` is the "cover"/main image. `imageUrl`
       // stays as a real column (every other page/query already reads it
@@ -431,6 +471,7 @@ export class ProductsService {
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
           stockStatus: resolveStockStatus(v),
+          availableFrom: v.availableFrom ? new Date(v.availableFrom) : null,
         }),
       ),
       gallery: gallery?.map((g, i) =>
@@ -469,9 +510,12 @@ export class ProductsService {
     const product = await this.productsRepo.preload({
       id,
       ...productData,
-      ...(scheduledPublishAt !== undefined
-        ? { scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null }
-        : {}),
+      // Overrides productData.isPublished when a schedule is being set/cleared
+      // in this request: a future schedule always forces Draft, a past/present
+      // one publishes immediately and clears itself. Omitted entirely (not
+      // `{}` but truly absent) when scheduledPublishAt isn't part of this
+      // PATCH at all, leaving isPublished/scheduledPublishAt untouched.
+      ...resolveScheduleFields(scheduledPublishAt),
       // Same derivation as create(): the first gallery image is always the
       // cover/main image. An explicitly-sent empty gallery ([]) clears the
       // cover back to null rather than leaving a stale imageUrl behind.
@@ -495,6 +539,7 @@ export class ProductsService {
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
           stockStatus: resolveStockStatus(v),
+          availableFrom: v.availableFrom ? new Date(v.availableFrom) : null,
         }),
       );
       await this.variantsRepo.save(newVariants);
