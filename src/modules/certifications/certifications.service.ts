@@ -19,7 +19,7 @@ export class CertificationsService {
         'certification.productCount',
         'certification.products',
         'product',
-        (qb) => qb.andWhere('product.isActive = true'),
+        (qb) => qb.andWhere('product.isPublished = true'),
       )
       .orderBy('certification.name', 'ASC')
       .getMany();
@@ -40,7 +40,7 @@ export class CertificationsService {
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.variants', 'variants')
       .innerJoin('product.certifications', 'cert', 'cert.id = :certId', { certId: cert.id })
-      .where('product.isActive = true')
+      .where('product.isPublished = true')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();

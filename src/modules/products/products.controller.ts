@@ -60,7 +60,7 @@ export class ProductsController {
     @Query('search') search?: string,
     @Query('categoryId') categoryId?: string,
     @Query('functionSlug') functionSlug?: string,
-    @Query('isActive') isActive?: string,
+    @Query('isPublished') isPublished?: string,
     @Query('sort') sort?: ProductSort,
     @Query('stockStatus') stockStatus?: string,
     @Query('lowStock') lowStock?: string,
@@ -71,7 +71,7 @@ export class ProductsController {
       search,
       categoryId ? Number(categoryId) : undefined,
       functionSlug,
-      isActive,
+      isPublished,
       sort,
       stockStatus,
       lowStock,
@@ -92,8 +92,8 @@ export class ProductsController {
   }
 
   @Get(':slug')
-  findOne(@Param('slug') slug: string) {
-    return this.productsService.findBySlug(slug);
+  findOne(@Param('slug') slug: string, @Query('password') password?: string) {
+    return this.productsService.findBySlug(slug, password);
   }
 
   @Get(':slug/related')
