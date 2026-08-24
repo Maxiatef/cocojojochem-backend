@@ -5,6 +5,7 @@ import {
   ManyToOne,
   OneToMany,
   ManyToMany,
+  OneToOne,
   JoinColumn,
   JoinTable,
   CreateDateColumn,
@@ -18,6 +19,13 @@ import { ProductVariant } from './ProductVariant';
 import { ProductImage } from './ProductImage';
 import { ProductDocument } from './ProductDocument';
 import { ProductSpec } from './ProductSpec';
+import { ProductSeo } from './ProductSeo';
+
+export enum ProductVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+  PASSWORD_PROTECTED = 'PASSWORD_PROTECTED',
+}
 
 @Entity('products')
 export class Product {
@@ -87,11 +95,29 @@ export class Product {
   @OneToMany(() => ProductSpec, (spec) => spec.product, { cascade: true })
   specs: ProductSpec[];
 
+  @OneToOne(() => ProductSeo, (seo) => seo.product)
+  seo: ProductSeo;
+
   @Column({ default: true })
-  isActive: boolean;
+  isPublished: boolean;
 
   @Column({ default: false })
   isFeatured: boolean;
+
+  @Column({ type: 'enum', enum: ProductVisibility, default: ProductVisibility.PUBLIC })
+  visibility: ProductVisibility;
+
+  @Column({ type: 'varchar', nullable: true })
+  visibilityPassword: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  scheduledPublishAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  brand: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   metaTitle: string | null;

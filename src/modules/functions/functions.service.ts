@@ -17,7 +17,7 @@ export class FunctionsService {
     const qb = this.functionsRepo
       .createQueryBuilder('function')
       .loadRelationCountAndMap('function.productCount', 'function.products', 'product', (qb) =>
-        qb.andWhere('product.isActive = true'),
+        qb.andWhere('product.isPublished = true'),
       );
 
     if (search) {
@@ -33,7 +33,7 @@ export class FunctionsService {
           .from('product_functions', 'pf')
           .innerJoin('products', 'p', 'p.id = pf."productId"')
           .where('pf."functionId" = function.id')
-          .andWhere('p."isActive" = true');
+          .andWhere('p."isPublished" = true');
       }, 'product_count').orderBy('product_count', sort === 'products_desc' ? 'DESC' : 'ASC');
     } else if (sort === 'name_desc') {
       qb.orderBy('function.name', 'DESC');
@@ -63,7 +63,7 @@ export class FunctionsService {
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.variants', 'variants')
       .innerJoin('product.functions', 'fn', 'fn.id = :fnId', { fnId: fn.id })
-      .where('product.isActive = true')
+      .where('product.isPublished = true')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNumber,
@@ -9,7 +10,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { StockStatus } from '../../../entities';
+import { StockStatus, ProductVisibility } from '../../../entities';
 
 export class CreateVariantDto {
   @IsString()
@@ -56,6 +57,45 @@ export class GalleryImageDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+}
+
+export class ProductSpecDto {
+  @IsString()
+  key: string;
+
+  @IsString()
+  value: string;
+}
+
+export class ProductSeoDto {
+  @IsOptional()
+  @IsString()
+  focusKeyphrase?: string;
+
+  @IsOptional()
+  @IsString()
+  seoTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  socialTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  socialDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  socialImageUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
 }
 
 export class CreateProductDto {
@@ -121,9 +161,40 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean;
+  isPublished?: boolean;
 
   @IsOptional()
   @IsBoolean()
   isFeatured?: boolean;
+
+  @IsOptional()
+  @IsEnum(ProductVisibility)
+  visibility?: ProductVisibility;
+
+  @IsOptional()
+  @IsString()
+  visibilityPassword?: string;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledPublishAt?: string;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductSpecDto)
+  specs?: ProductSpecDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProductSeoDto)
+  seo?: ProductSeoDto;
 }

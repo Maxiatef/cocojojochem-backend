@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Category,
@@ -10,6 +12,7 @@ import {
   ProductImage,
   ProductDocument,
   ProductSpec,
+  ProductSeo,
   Company,
   User,
   Cart,
@@ -63,6 +66,16 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Global baseline: 100 requests/min per IP. Sensitive routes (login, register,
+    // guest checkout, coupon validation, contact/newsletter forms) override this
+    // with a tighter limit via @Throttle() directly on their controller methods.
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST || 'localhost',
@@ -79,6 +92,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
         ProductImage,
         ProductDocument,
         ProductSpec,
+        ProductSeo,
         Company,
         User,
         Cart,
@@ -124,6 +138,12 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     // SeoPagesModule, // disabled — see comment above the import
     SiteSettingsModule,
     SeoAnalyzerModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

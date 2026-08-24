@@ -1,7 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Product, ProductImage, ProductVariant, StockStatus } from '../../entities';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import {
+  Product,
+  ProductImage,
+  ProductVariant,
+  ProductSpec,
+  ProductSeo,
+  StockStatus,
+  ProductVisibility,
+} from '../../entities';
 import { withPricing } from '../../common/pricing.util';
 import { CreateProductDto, CreateVariantDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -34,6 +42,10 @@ export class ProductsService {
     private readonly variantsRepo: Repository<ProductVariant>,
     @InjectRepository(ProductImage)
     private readonly galleryRepo: Repository<ProductImage>,
+    @InjectRepository(ProductSpec)
+    private readonly specsRepo: Repository<ProductSpec>,
+    @InjectRepository(ProductSeo)
+    private readonly seoRepo: Repository<ProductSeo>,
   ) {}
 
   private baseQuery() {
@@ -43,7 +55,23 @@ export class ProductsService {
       .leftJoinAndSelect('product.variants', 'variants')
       .leftJoinAndSelect('product.functions', 'functions')
       .leftJoinAndSelect('product.certifications', 'certifications')
-      .leftJoinAndSelect('product.gallery', 'gallery');
+      .leftJoinAndSelect('product.gallery', 'gallery')
+      .leftJoinAndSelect('product.specs', 'specs')
+      .leftJoinAndSelect('product.seo', 'seo');
+  }
+
+  // Public visibility gate — applied on top of baseQuery() for every
+  // public-facing (non-admin) query. A product must be published, not
+  // scheduled for the future, and PUBLIC visibility. PASSWORD_PROTECTED
+  // products are excluded here entirely (they only surface via findBySlug
+  // with the matching password); PRIVATE products never surface publicly.
+  private applyPublicVisibility(qb: SelectQueryBuilder<Product>) {
+    return qb
+      .andWhere('product.isPublished = true')
+      .andWhere('(product.scheduledPublishAt IS NULL OR product.scheduledPublishAt <= NOW())')
+      .andWhere('product.visibility = :publicVisibility', {
+        publicVisibility: ProductVisibility.PUBLIC,
+      });
   }
 
   // Decorates every variant with isOnSale/effectivePrice, matching the shape
@@ -60,7 +88,7 @@ export class ProductsService {
     const page = query.page || 1;
     const limit = query.limit || 20;
 
-    const qb = this.baseQuery().where('product.isActive = true');
+    const qb = this.applyPublicVisibility(this.baseQuery());
 
     if (query.categoryId) {
       qb.andWhere('product.categoryId = :categoryId', { categoryId: query.categoryId });
@@ -128,7 +156,7 @@ export class ProductsService {
   async findById(id: number) {
     const product = await this.productsRepo.findOne({
       where: { id },
-      relations: ['category', 'variants', 'functions', 'certifications', 'gallery'],
+      relations: ['category', 'variants', 'functions', 'certifications', 'gallery', 'specs', 'seo'],
     });
     if (!product) throw new NotFoundException(`Product #${id} not found`);
     return this.decorate(product);
@@ -142,7 +170,7 @@ export class ProductsService {
     search?: string,
     categoryId?: number,
     functionSlug?: string,
-    isActive?: string,
+    isPublished?: string,
     sort?: ProductSort,
     stockStatus?: string,
     lowStock?: string,
@@ -161,10 +189,10 @@ export class ProductsService {
     if (functionSlug) {
       qb.andWhere('functions.slug = :functionSlug', { functionSlug });
     }
-    if (isActive === 'true') {
-      qb.andWhere('product.isActive = true');
-    } else if (isActive === 'false') {
-      qb.andWhere('product.isActive = false');
+    if (isPublished === 'true') {
+      qb.andWhere('product.isPublished = true');
+    } else if (isPublished === 'false') {
+      qb.andWhere('product.isPublished = false');
     }
     if (stockStatus) {
       qb.andWhere('variants.stockStatus = :stockStatus', { stockStatus });
@@ -216,8 +244,8 @@ export class ProductsService {
   async getAdminStats() {
     const [total, active, inactive, outOfStock, onBackorder, lowStock] = await Promise.all([
       this.productsRepo.count(),
-      this.productsRepo.count({ where: { isActive: true } }),
-      this.productsRepo.count({ where: { isActive: false } }),
+      this.productsRepo.count({ where: { isPublished: true } }),
+      this.productsRepo.count({ where: { isPublished: false } }),
       this.baseQuery()
         .andWhere('variants.stockStatus = :status', { status: StockStatus.OUT_OF_STOCK })
         .getCount(),
@@ -235,7 +263,7 @@ export class ProductsService {
     return { total, active, inactive, outOfStock, onBackorder, lowStock };
   }
 
-  async findBySlug(slug: string) {
+  async findBySlug(slug: string, password?: string) {
     const product = await this.productsRepo.findOne({
       where: { slug },
       relations: [
@@ -246,15 +274,36 @@ export class ProductsService {
         'gallery',
         'documents',
         'specs',
+        'seo',
       ],
     });
     if (!product) throw new NotFoundException(`Product "${slug}" not found`);
+
+    const notFound = () => new NotFoundException(`Product "${slug}" not found`);
+
+    const now = new Date();
+    const isScheduledForFuture =
+      !!product.scheduledPublishAt && product.scheduledPublishAt > now;
+
+    if (!product.isPublished || isScheduledForFuture) {
+      throw notFound();
+    }
+
+    if (product.visibility === ProductVisibility.PRIVATE) {
+      throw notFound();
+    }
+
+    if (product.visibility === ProductVisibility.PASSWORD_PROTECTED) {
+      if (!password || password !== product.visibilityPassword) {
+        throw notFound();
+      }
+    }
+
     return this.decorate(product);
   }
 
   async findFeatured(limit = 12) {
-    const products = await this.baseQuery()
-      .where('product.isActive = true')
+    const products = await this.applyPublicVisibility(this.baseQuery())
       .andWhere('product.isFeatured = true')
       .take(limit)
       .getMany();
@@ -272,8 +321,7 @@ export class ProductsService {
 
     const functionIds = product.functions.map((f) => f.id);
 
-    const qb = this.baseQuery()
-      .where('product.isActive = true')
+    const qb = this.applyPublicVisibility(this.baseQuery())
       .andWhere('product.id != :id', { id: product.id })
       .andWhere(
         functionIds.length
@@ -329,6 +377,9 @@ export class ProductsService {
         OR similarity(coalesce(p."inciName", ''), $2) > 0.15
         OR similarity(coalesce(p."casNumber", ''), $2) > 0.15
       )
+      AND p."isPublished" = true
+      AND (p."scheduledPublishAt" IS NULL OR p."scheduledPublishAt" <= NOW())
+      AND p."visibility" = 'PUBLIC'
       ${categoryFilter}
       ORDER BY "relevance" DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
@@ -341,10 +392,11 @@ export class ProductsService {
 
   // A-Z index: products grouped by first letter, matching cocojojo.com's alphabetical browse.
   async findAZIndex() {
-    const products = await this.productsRepo
-      .createQueryBuilder('product')
-      .select(['product.id', 'product.name', 'product.slug'])
-      .where('product.isActive = true')
+    const products = await this.applyPublicVisibility(
+      this.productsRepo
+        .createQueryBuilder('product')
+        .select(['product.id', 'product.name', 'product.slug', 'product.isPublished', 'product.scheduledPublishAt', 'product.visibility']),
+    )
       .orderBy('product.name', 'ASC')
       .getMany();
 
@@ -358,9 +410,10 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto) {
-    const { variants, functionIds, certificationIds, gallery, ...productData } = dto;
+    const { variants, functionIds, certificationIds, gallery, specs, seo, scheduledPublishAt, ...productData } = dto;
     const product = this.productsRepo.create({
       ...productData,
+      scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null,
       // Single unified image list from the admin's perspective: whichever
       // image is first in `gallery` is the "cover"/main image. `imageUrl`
       // stays as a real column (every other page/query already reads it
@@ -385,15 +438,36 @@ export class ProductsService {
       ),
     });
     const saved = await this.productsRepo.save(product);
+
+    if (specs) {
+      const newSpecs = specs.map((s) => this.specsRepo.create({ ...s, productId: saved.id }));
+      await this.specsRepo.save(newSpecs);
+    }
+
+    if (seo) {
+      await this.upsertSeo(saved.id, seo);
+    }
+
     this.logger.log(`Product created: "${saved.name}" (id=${saved.id}, sku=${saved.sku})`);
     return saved;
   }
 
+  // Upsert (not delete-then-recreate) since ProductSeo is a single 1:1 row,
+  // unlike the list-shaped variants/gallery/specs.
+  private async upsertSeo(productId: number, seo: NonNullable<CreateProductDto['seo']>) {
+    const existing = await this.seoRepo.findOne({ where: { productId } });
+    const merged = this.seoRepo.create({ ...existing, ...seo, productId });
+    await this.seoRepo.save(merged);
+  }
+
   async update(id: number, dto: UpdateProductDto) {
-    const { variants, functionIds, certificationIds, gallery, ...productData } = dto;
+    const { variants, functionIds, certificationIds, gallery, specs, seo, scheduledPublishAt, ...productData } = dto;
     const product = await this.productsRepo.preload({
       id,
       ...productData,
+      ...(scheduledPublishAt !== undefined
+        ? { scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null }
+        : {}),
       // Same derivation as create(): the first gallery image is always the
       // cover/main image. An explicitly-sent empty gallery ([]) clears the
       // cover back to null rather than leaving a stale imageUrl behind.
@@ -434,6 +508,17 @@ export class ProductsService {
         }),
       );
       await this.galleryRepo.save(newGallery);
+    }
+
+    // Same delete-then-recreate approach as variants/gallery above.
+    if (specs) {
+      await this.specsRepo.delete({ productId: id });
+      const newSpecs = specs.map((s) => this.specsRepo.create({ ...s, productId: id }));
+      await this.specsRepo.save(newSpecs);
+    }
+
+    if (seo) {
+      await this.upsertSeo(id, seo);
     }
 
     this.logger.log(`Product updated: "${saved.name}" (id=${saved.id})`);

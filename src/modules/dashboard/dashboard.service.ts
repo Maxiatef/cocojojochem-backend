@@ -56,7 +56,7 @@ export class DashboardService {
       lowStockVariants,
       recentOrders,
     ] = await Promise.all([
-      this.productsRepo.count({ where: { isActive: true } }),
+      this.productsRepo.count({ where: { isPublished: true } }),
       this.categoriesRepo.count(),
       this.companiesRepo.count(),
       this.companiesRepo.count({ where: { status: AccountStatus.PENDING } }),

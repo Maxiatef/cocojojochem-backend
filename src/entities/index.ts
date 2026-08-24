@@ -6,6 +6,7 @@ export * from './ProductVariant';
 export * from './ProductImage';
 export * from './ProductDocument';
 export * from './ProductSpec';
+export * from './ProductSeo';
 export * from './Company';
 export * from './User';
 export * from './Cart';

@@ -21,7 +21,7 @@ export class CategoriesService {
     const qb = this.categoriesRepo
       .createQueryBuilder('category')
       .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
-        qb.andWhere('product.isActive = true'),
+        qb.andWhere('product.isPublished = true'),
       );
 
     if (search) {
@@ -36,7 +36,7 @@ export class CategoriesService {
           .select('COUNT(*)', 'cnt')
           .from('products', 'p')
           .where('p."categoryId" = category.id')
-          .andWhere('p."isActive" = true');
+          .andWhere('p."isPublished" = true');
       }, 'product_count').orderBy('product_count', sort === 'products_desc' ? 'DESC' : 'ASC');
     } else if (sort === 'name_desc') {
       qb.orderBy('category.name', 'DESC');
@@ -68,7 +68,7 @@ export class CategoriesService {
       .createQueryBuilder('category')
       .leftJoinAndSelect('category.children', 'children')
       .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
-        qb.andWhere('product.isActive = true'),
+        qb.andWhere('product.isPublished = true'),
       )
       .where('category.slug = :slug', { slug })
       .getOne();
@@ -93,7 +93,7 @@ export class CategoriesService {
       .leftJoinAndSelect('product.variants', 'variants')
       .leftJoinAndSelect('product.functions', 'functions')
       .where('product.categoryId IN (:...categoryIds)', { categoryIds })
-      .andWhere('product.isActive = true')
+      .andWhere('product.isPublished = true')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
