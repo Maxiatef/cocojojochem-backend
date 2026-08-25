@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { Order, User, UserRole } from '../../entities';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -97,7 +98,50 @@ export class UsersService {
       order: { createdAt: 'DESC' },
       take: 10,
     });
-    return { ...user, recentOrders };
+    const [orderCountRaw, totalSpentRaw] = await Promise.all([
+      this.ordersRepo.count({ where: { userId: id } }),
+      this.ordersRepo
+        .createQueryBuilder('order')
+        .where('order.userId = :id', { id })
+        .select('COALESCE(SUM(order.total), 0)', 'total')
+        .getRawOne<{ total: string }>(),
+    ]);
+    return {
+      ...user,
+      recentOrders,
+      orderCount: orderCountRaw,
+      totalSpent: Number(totalSpentRaw?.total || 0),
+      lastOrderDate: recentOrders[0]?.createdAt ?? null,
+    };
+  }
+
+  // Admin: full profile update — fullName/email/phone/role/companyId.
+  // Self-demotion is blocked one level up in the controller (needs the
+  // requesting admin's own id, which the service doesn't have).
+  async updateUser(id: number, dto: UpdateUserDto) {
+    const user = await this.findById(id);
+
+    if (dto.email && dto.email !== user.email) {
+      const existing = await this.findByEmail(dto.email);
+      if (existing && existing.id !== id) {
+        throw new ConflictException('Email already registered to another account');
+      }
+      user.email = dto.email;
+    }
+
+    if (dto.fullName !== undefined) user.fullName = dto.fullName;
+    if (dto.phone !== undefined) user.phone = dto.phone;
+    if (dto.role !== undefined) user.role = dto.role;
+    if (dto.companyId !== undefined) user.companyId = dto.companyId;
+
+    return this.usersRepo.save(user);
+  }
+
+  async setPassword(id: number, newPassword: string) {
+    const user = await this.findById(id);
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.usersRepo.save(user);
+    return { success: true };
   }
 
   async updateRole(id: number, role: UserRole) {

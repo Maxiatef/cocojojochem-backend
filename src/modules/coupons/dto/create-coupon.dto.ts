@@ -34,6 +34,11 @@ export class CreateCouponDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  maxOrderAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   maxDiscount?: number;
 
   @IsOptional()
@@ -89,4 +94,36 @@ export class CreateCouponDto {
   @IsInt()
   @Min(1)
   maxUsagePerUser?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowFreeShipping?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  individualUseOnly?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  excludeSaleItems?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  allowedEmails?: string[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  limitUsageToXItems?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  includedBrands?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  excludedBrands?: string[];
 }

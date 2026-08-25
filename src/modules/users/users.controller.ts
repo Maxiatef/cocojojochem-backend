@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -8,6 +20,7 @@ import { UsersService } from './users.service';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
+import { AdminSetPasswordDto, UpdateUserDto } from './dto/update-user.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth('access-token')
@@ -47,5 +60,24 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   updateRole(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
     return this.usersService.updateRole(id, dto.role);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  updateUser(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateUserDto) {
+    // Don't let an admin demote themselves out of ADMIN — that could lock
+    // everyone out if they're the only admin account.
+    if (req.user.id === id && dto.role && dto.role !== UserRole.ADMIN) {
+      throw new BadRequestException('You cannot change your own role away from Admin.');
+    }
+    return this.usersService.updateUser(id, dto);
+  }
+
+  @Patch(':id/password')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  setPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: AdminSetPasswordDto) {
+    return this.usersService.setPassword(id, dto.newPassword);
   }
 }

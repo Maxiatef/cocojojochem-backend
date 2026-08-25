@@ -15,6 +15,10 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { UpdateCouponDto } from './dto/update-coupon.dto';
 import { QueryCouponsDto } from './dto/query-coupons.dto';
 import { ValidateCouponDto, ValidateCouponCartItemDto } from './dto/validate-coupon.dto';
+// Sale status for excludeSaleItems comes from the trusted client-supplied
+// item.isOnSale flag (see ValidateCouponCartItemDto) rather than a DB
+// lookup here — see common/pricing.util.ts's isSaleActive() for how the
+// storefront computes that flag in the first place.
 
 function parseIds(value: string | null): number[] {
   if (!value) return [];
@@ -24,6 +28,16 @@ function parseIds(value: string | null): number[] {
   } catch {
     return [];
   }
+}
+
+// Wildcard email match used by Coupon.allowedEmails: a leading "*" matches
+// any prefix (e.g. "*@company.com"); a pattern with no "*" must match the
+// full email exactly. Always case-insensitive.
+function emailMatchesPattern(email: string, pattern: string): boolean {
+  const e = email.toLowerCase();
+  const p = pattern.toLowerCase().trim();
+  if (p.startsWith('*')) return e.endsWith(p.slice(1));
+  return e === p;
 }
 
 @Injectable()
@@ -86,6 +100,7 @@ export class CouponsService {
       code: dto.code.toUpperCase(),
       value: String(dto.value),
       minOrderAmount: dto.minOrderAmount != null ? String(dto.minOrderAmount) : null,
+      maxOrderAmount: dto.maxOrderAmount != null ? String(dto.maxOrderAmount) : null,
       maxDiscount: dto.maxDiscount != null ? String(dto.maxDiscount) : null,
       startDate: dto.startDate ? new Date(dto.startDate) : null,
       endDate: dto.endDate ? new Date(dto.endDate) : null,
@@ -95,6 +110,9 @@ export class CouponsService {
       includedCategoryIds: dto.includedCategoryIds ? JSON.stringify(dto.includedCategoryIds) : null,
       includedProductIds: dto.includedProductIds ? JSON.stringify(dto.includedProductIds) : null,
       includedVariantIds: dto.includedVariantIds ? JSON.stringify(dto.includedVariantIds) : null,
+      allowedEmails: dto.allowedEmails && dto.allowedEmails.length ? dto.allowedEmails : null,
+      includedBrands: dto.includedBrands && dto.includedBrands.length ? dto.includedBrands : null,
+      excludedBrands: dto.excludedBrands && dto.excludedBrands.length ? dto.excludedBrands : null,
     });
     const saved = await this.couponsRepo.save(coupon);
     this.logger.log(`Coupon created: ${saved.code} (id=${saved.id})`);
@@ -107,6 +125,7 @@ export class CouponsService {
     if (dto.code) patch.code = dto.code.toUpperCase();
     if (dto.value != null) patch.value = String(dto.value);
     if (dto.minOrderAmount !== undefined) patch.minOrderAmount = dto.minOrderAmount != null ? String(dto.minOrderAmount) : null;
+    if (dto.maxOrderAmount !== undefined) patch.maxOrderAmount = dto.maxOrderAmount != null ? String(dto.maxOrderAmount) : null;
     if (dto.maxDiscount !== undefined) patch.maxDiscount = dto.maxDiscount != null ? String(dto.maxDiscount) : null;
     if (dto.startDate !== undefined) patch.startDate = dto.startDate ? new Date(dto.startDate) : null;
     if (dto.endDate !== undefined) patch.endDate = dto.endDate ? new Date(dto.endDate) : null;
@@ -119,6 +138,9 @@ export class CouponsService {
       'includedVariantIds',
     ] as const) {
       if (dto[key] !== undefined) patch[key] = dto[key] ? JSON.stringify(dto[key]) : null;
+    }
+    for (const key of ['allowedEmails', 'includedBrands', 'excludedBrands'] as const) {
+      if (dto[key] !== undefined) patch[key] = dto[key] && dto[key]!.length ? dto[key] : null;
     }
     Object.assign(coupon, patch);
     const saved = await this.couponsRepo.save(coupon);
@@ -144,14 +166,26 @@ export class CouponsService {
     const includedCategoryIds = parseIds(coupon.includedCategoryIds);
     const includedProductIds = parseIds(coupon.includedProductIds);
     const includedVariantIds = parseIds(coupon.includedVariantIds);
+    const excludedBrands = (coupon.excludedBrands || []).map((b) => b.toLowerCase());
+    const includedBrands = (coupon.includedBrands || []).map((b) => b.toLowerCase());
 
     const hasIncludeList =
-      includedCategoryIds.length > 0 || includedProductIds.length > 0 || includedVariantIds.length > 0;
+      includedCategoryIds.length > 0 ||
+      includedProductIds.length > 0 ||
+      includedVariantIds.length > 0 ||
+      includedBrands.length > 0;
 
-    return cartItems.filter((item) => {
+    let eligible = cartItems.filter((item) => {
       if (item.variantId && excludedVariantIds.includes(item.variantId)) return false;
       if (item.productId && excludedProductIds.includes(item.productId)) return false;
       if (item.categoryId && excludedCategoryIds.includes(item.categoryId)) return false;
+      if (item.brand && excludedBrands.includes(item.brand.toLowerCase())) return false;
+
+      // excludeSaleItems: relies on the trusted client-supplied isOnSale
+      // flag (see ValidateCouponCartItemDto) — a currently-on-sale item is
+      // never eligible when this restriction is enabled, regardless of
+      // what the category/product/variant/brand rules would otherwise allow.
+      if (coupon.excludeSaleItems && item.isOnSale) return false;
 
       if (!hasIncludeList) {
         // No explicit include list — everything not excluded is eligible
@@ -165,8 +199,20 @@ export class CouponsService {
       if (item.variantId && includedVariantIds.includes(item.variantId)) return true;
       if (item.productId && includedProductIds.includes(item.productId)) return true;
       if (item.categoryId && includedCategoryIds.includes(item.categoryId)) return true;
+      if (item.brand && includedBrands.includes(item.brand.toLowerCase())) return true;
       return false;
     });
+
+    // limitUsageToXItems caps how many distinct eligible cart LINES (not
+    // total quantity) receive the discount, matching WooCommerce's
+    // "Customers can apply the coupon to a maximum of X items" semantics.
+    // Applied after exclusion/inclusion filtering, before discount amounts
+    // are computed — items beyond the cap stay at full price.
+    if (coupon.limitUsageToXItems != null && eligible.length > coupon.limitUsageToXItems) {
+      eligible = eligible.slice(0, coupon.limitUsageToXItems);
+    }
+
+    return eligible;
   }
 
   async validateCoupon(dto: ValidateCouponDto) {
@@ -201,6 +247,42 @@ export class CouponsService {
       }
     }
 
+    if (coupon.allowedEmails != null && coupon.allowedEmails.length > 0) {
+      if (!dto.email) {
+        return {
+          isValid: false,
+          coupon,
+          message: 'This coupon is restricted to specific email addresses',
+        };
+      }
+      const matches = coupon.allowedEmails.some((pattern) => emailMatchesPattern(dto.email as string, pattern));
+      if (!matches) {
+        return {
+          isValid: false,
+          coupon,
+          message: 'This coupon is not valid for your email address',
+        };
+      }
+    }
+
+    // Raw (pre-restriction) check first — if the cart's raw total is
+    // already below minOrderAmount / above maxOrderAmount, that message
+    // should win before any eligibility-filtering message does.
+    if (coupon.minOrderAmount != null && dto.orderAmount < Number(coupon.minOrderAmount)) {
+      return {
+        isValid: false,
+        coupon,
+        message: `Minimum order amount of $${coupon.minOrderAmount} required`,
+      };
+    }
+    if (coupon.maxOrderAmount != null && dto.orderAmount > Number(coupon.maxOrderAmount)) {
+      return {
+        isValid: false,
+        coupon,
+        message: `This coupon can only be used on orders up to $${coupon.maxOrderAmount}`,
+      };
+    }
+
     const cartItems = dto.cartItems || [];
     const eligibleItems = cartItems.length ? this.getEligibleItems(coupon, cartItems) : [];
     const eligibleAmount = cartItems.length
@@ -217,6 +299,9 @@ export class CouponsService {
       };
     }
 
+    // Re-check against the eligible (post-restriction) amount too — the raw
+    // check above catches the cart-wide case, but eligibility filtering can
+    // still push the relevant amount below/above the threshold.
     if (coupon.minOrderAmount != null && eligibleAmount < Number(coupon.minOrderAmount)) {
       return {
         isValid: false,
@@ -224,9 +309,40 @@ export class CouponsService {
         message: `Minimum order amount of $${coupon.minOrderAmount} required`,
       };
     }
+    if (coupon.maxOrderAmount != null && eligibleAmount > Number(coupon.maxOrderAmount)) {
+      return {
+        isValid: false,
+        coupon,
+        message: `This coupon can only be used on orders up to $${coupon.maxOrderAmount}`,
+      };
+    }
 
-    let discountAmount =
-      coupon.type === CouponType.PERCENTAGE ? eligibleAmount * (Number(coupon.value) / 100) : Number(coupon.value);
+    // Discount-amount calculation for all 4 CouponType values.
+    // PERCENTAGE_PRODUCT and PERCENTAGE_CART converge on the same raw
+    // pre-cap total (sum of item.price*qty*pct% == eligibleAmount*pct%),
+    // but are kept as genuinely separate code paths since the distinction
+    // matters if/when per-item capping is introduced later.
+    let discountAmount: number;
+    if (coupon.type === CouponType.PERCENTAGE_CART) {
+      discountAmount = eligibleAmount * (Number(coupon.value) / 100);
+    } else if (coupon.type === CouponType.PERCENTAGE_PRODUCT) {
+      const pct = Number(coupon.value) / 100;
+      discountAmount = eligibleItems.length
+        ? eligibleItems.reduce((sum, item) => sum + item.price * item.quantity * pct, 0)
+        : eligibleAmount * pct;
+    } else if (coupon.type === CouponType.FIXED_PRODUCT) {
+      const flat = Number(coupon.value);
+      discountAmount = eligibleItems.length
+        ? eligibleItems.reduce((sum, item) => {
+            const lineTotal = item.price * item.quantity;
+            const lineDiscount = Math.min(flat * item.quantity, lineTotal);
+            return sum + lineDiscount;
+          }, 0)
+        : Math.min(flat, eligibleAmount);
+    } else {
+      // FIXED_CART — flat amount off the whole eligible subtotal once.
+      discountAmount = Number(coupon.value);
+    }
 
     if (coupon.maxDiscount != null) {
       discountAmount = Math.min(discountAmount, Number(coupon.maxDiscount));

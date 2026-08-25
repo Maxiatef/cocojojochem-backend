@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNumber,
@@ -22,6 +23,18 @@ export class ValidateCouponCartItemDto {
   @IsOptional()
   @IsInt()
   categoryId?: number;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
+  // Trusted client-supplied flag (same pattern as categoryId/productId etc.)
+  // reflecting whatever isSaleActive() (common/pricing.util.ts) computed for
+  // this cart line's variant — the cart item DTO has no price-history fields
+  // to re-derive sale status from server-side.
+  @IsOptional()
+  @IsBoolean()
+  isOnSale?: boolean;
 
   @IsInt()
   @Min(1)
