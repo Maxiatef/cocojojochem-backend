@@ -21,6 +21,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { OrdersService } from './orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTrackingDto } from './dto/update-tracking.dto';
+import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
 
 class UpdateOrderStatusDto {
   @IsEnum(OrderStatus)
@@ -96,5 +97,13 @@ export class OrdersController {
   @UseGuards(OptionalJwtAuthGuard)
   checkout(@Req() req: any, @Body() dto: CheckoutDto) {
     return this.ordersService.checkout(req.user?.id ?? null, dto);
+  }
+
+  // Public, pre-account — used while filling out the checkout form, well
+  // before login/guest identity is known.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('shipping-estimate')
+  shippingEstimate(@Body() dto: ShippingEstimateDto) {
+    return this.ordersService.getShippingEstimate(dto);
   }
 }

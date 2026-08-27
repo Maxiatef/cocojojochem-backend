@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
-  AccountStatus,
   Category,
   Company,
   NewsletterSubscriber,
@@ -41,7 +40,6 @@ export class DashboardService {
       productCount,
       categoryCount,
       companyCount,
-      pendingCompanyCount,
       newQuoteRequestCount,
       totalQuoteRequestCount,
       pendingOrderCount,
@@ -59,7 +57,6 @@ export class DashboardService {
       this.productsRepo.count({ where: { isPublished: true } }),
       this.categoriesRepo.count(),
       this.companiesRepo.count(),
-      this.companiesRepo.count({ where: { status: AccountStatus.PENDING } }),
       this.quoteRequestsRepo.count({ where: { status: RequestStatus.NEW } }),
       this.quoteRequestsRepo.count(),
       this.ordersRepo.count({ where: { status: OrderStatus.PENDING } }),
@@ -140,7 +137,7 @@ export class DashboardService {
 
     return {
       catalog: { productCount, categoryCount },
-      accounts: { companyCount, pendingCompanyCount },
+      accounts: { companyCount },
       leads: { newQuoteRequestCount, totalQuoteRequestCount },
       orders: {
         pendingOrderCount,

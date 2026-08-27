@@ -9,6 +9,8 @@ export * from './ProductSpec';
 export * from './ProductSeo';
 export * from './Company';
 export * from './User';
+export * from './RefreshToken';
+export * from './PasswordResetRequest';
 export * from './Cart';
 export * from './CartItem';
 export * from './Order';

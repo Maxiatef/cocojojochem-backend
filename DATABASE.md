@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-22 tables in the `cocojojochem` Postgres database, grouped by purpose. Each maps to a TypeORM entity in [src/entities](src/entities).
+31 tables in the `cocojojochem` Postgres database, grouped by purpose. Each maps to a TypeORM entity in [src/entities](src/entities).
 
 ## Catalog (the wholesale product data)
 
@@ -34,13 +34,22 @@ Downloadable technical documents per product: COA (Certificate of Analysis), SDS
 ### `product_specs`
 Free-form key/value technical specifications per product (e.g. "Appearance" → "White powder", "pH" → "5.5–6.5").
 
+### `product_seo`
+Per-product SEO overrides — focus keyphrase, SEO title, meta description, and separate social (Open Graph) title/description/image/tags — editable from the admin product editor's SEO tab. One row per product (`productId` unique).
+
 ## Accounts
 
 ### `users`
 Login accounts — email, hashed password, name, phone, and a role (`CUSTOMER`, `ADMIN`, or `SALES`). A user can optionally belong to a company.
 
 ### `companies`
-B2B account records for wholesale buyers, with an approval workflow (`PENDING` → `APPROVED`/`REJECTED`/`SUSPENDED`). This is an addition beyond what the real cocojojo.com has — it doesn't track separate wholesale companies at all — added here because cocojojochem.com is meant to be a dedicated B2B site.
+B2B account records for wholesale buyers. Carries a `status` column (`PENDING`/`APPROVED`/`REJECTED`/`SUSPENDED`) left over from an approval workflow that's no longer surfaced anywhere in the admin UI (approve/reject actions, status badges, and the related endpoints were removed) — the column still exists in the schema but nothing reads or writes it today. This table itself is an addition beyond what the real cocojojo.com has — it doesn't track separate wholesale companies at all — added here because cocojojochem.com is meant to be a dedicated B2B site.
+
+### `refresh_tokens`
+Login sessions — only the SHA-256 hash of each issued refresh token is stored (never the raw token), with an expiry and a `revokedAt` for logout/rotation. Looked up by `tokenHash` on every `/auth/refresh` call.
+
+### `password_reset_requests`
+"Forgot password" flow state — only the hash of the emailed 5-digit code is stored, plus an `attempts` counter (locks out after 5 tries) and a separate single-use `verifiedTokenHash` issued once the code is confirmed, which is what the final set-new-password step actually consumes.
 
 ## Cart & Orders
 
@@ -51,18 +60,32 @@ One cart per logged-in user, for cross-device persistence. Guest (not-logged-in)
 Line items inside a cart: which variant, how many, price at the time it was added (so later price changes don't silently change what's in someone's cart), and whether it's a one-time purchase or subscription.
 
 ### `orders`
-A placed order: status (`PENDING` → `PROCESSING` → `SHIPPED` → `DELIVERED`, or `CANCELLED`), subtotal/total, shipping address, notes. Linked to the user who placed it.
+A placed order: status (`PENDING` → `PROCESSING` → `SHIPPED` → `DELIVERED`, or `CANCELLED`), subtotal/total, shipping address, notes, and the actual `shippingCost` charged (computed by `/orders/shipping-estimate` and carried through checkout). Also carries the fulfillment/payment provider reference ids the webhook listeners key off of: `stripePaymentIntentId`, `shipstationOrderId`, `shippoTrackingNumber`, plus `trackingNumber`/`carrierCode` once a shipment actually ships. Linked to the user who placed it, or to `guestEmail`/`guestName`/`guestPhone` for a guest checkout.
 
 ### `order_items`
 Line items inside an order — a frozen snapshot (product name, variant label, SKU, price) taken at checkout time, so the order record stays accurate even if the product is later renamed, repriced, or deleted.
 
+## Discounts
+
+### `coupons`
+Discount codes — percentage or fixed, cart- or product-scoped, with an extensive set of WooCommerce-style restrictions (min/max order amount, per-category/product/variant/brand include/exclude lists, usage limits, date window, allowed-email patterns, free-shipping/individual-use flags). Several fields (`allowFreeShipping`, `individualUseOnly`) round-trip correctly but have no effect yet — checkout doesn't act on them today.
+
+### `coupon_usages`
+One row per time a coupon was actually applied to a placed order — links the coupon, the order (nullable, `SET NULL` if the order is deleted), and the email that used it, so per-user usage limits can be enforced.
+
+### `bulk_sale_discounts`
+Storewide or scoped "buy more, save more" percentage discounts running over a date window — standalone, no foreign keys, matching the real site's schema (category/product/variant scoping is done via JSON-stringified id arrays, same convention as `coupons`).
+
 ## Leads & Marketing
 
 ### `quote_requests`
-Submissions from the "Request a Quote" / "Request a Sample" forms — the primary lead-generation mechanism on the real cocojojo.com wholesale page. Tracks a sales pipeline status (`NEW` → `IN_PROGRESS` → `QUOTED` → `WON`/`LOST`) and which company/user (if any) it's tied to.
+Submissions from the "Request a Quote" / "Request a Sample" forms — the primary lead-generation mechanism on the real cocojojo.com wholesale page. Tracks a sales pipeline status (`NEW` → `IN_PROGRESS` → `QUOTED` → `WON`/`LOST`) and which company/user (if any) it's tied to. Now supports multiple products per request (see `quote_request_items`) and triggers an internal email notification on creation.
 
 ### `quote_request_items`
 The specific products/quantities a lead asked about within one quote request.
+
+### `contact_messages`
+Submissions from the general "Contact Us" form — separate from quote requests. Tracks read status (`UNREAD`/`READ`/`ARCHIVED`) and a manual `repliedAt` flag an admin sets after replying outside the app (there's no way to confirm a real email was sent, so this is just an "I replied" marker, not a delivery receipt).
 
 ### `testimonials`
 Customer success-story quotes shown on the marketing pages, with an author, company, and optional measurable result (e.g. "300% operational scaling").
@@ -74,6 +97,15 @@ Email addresses collected from the "Wholesale Updates" signup form.
 
 ### `seo_pages`
 Per-page meta title/description/OG image overrides, so specific URLs can have custom SEO metadata without hardcoding it into page templates.
+
+### `seo_metrics`
+One row per analyzed storefront path — title/meta description/H1 snapshot, word count, internal/external link counts, image alt-text coverage, page load time, and a computed `seoScore`. Populated by the admin SEO analyzer, not hand-edited.
+
+### `seo_issues`
+Individual flagged problems found by the SEO analyzer for a given path (missing title, missing meta description, missing/multiple H1, thin content, missing alt text), each with a severity and an `isFixed` flag an admin can toggle once addressed.
+
+### `site_settings`
+Generic key/value configuration store (`PATCH /site-settings`, admin-only) — every value is a plain string keyed by an arbitrary string key. Backs the admin Settings page's General/Company & Warehouse/Wholesale & Shipping/Tax/Emails tabs (e.g. `siteName`, `WHOLESALE_MINIMUM`, `FREE_SHIPPING_THRESHOLD`, `warehouseCity`, `quoteNotificationEmail`, `senderEmail`, `tax.name`). Not every key backend logic reads is guaranteed to have a row — `SiteSettingsService.getValue()` returns `null` for an unset key, and callers fall back to an env var or hardcoded default in that case.
 
 ### `migrations`
 TypeORM's own internal bookkeeping table — records which migration files have already been applied, so `migrationsRun`/`migration:run` knows what's left to do. Not part of the application data model.

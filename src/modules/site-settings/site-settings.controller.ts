@@ -19,6 +19,19 @@ export class SiteSettingsController {
     return this.siteSettingsService.findAll();
   }
 
+  // Read-only status of which third-party integrations have credentials
+  // configured — never returns the actual key values. Keys themselves stay
+  // in .env, not the DB, so there's nothing here for this endpoint to leak.
+  @Get('integrations-status')
+  getIntegrationsStatus() {
+    return {
+      stripe: !!process.env.STRIPE_SECRET_KEY,
+      shipstation: !!process.env.SHIPSTATION_API_KEY,
+      brevo: !!process.env.BREVO_API_KEY,
+      shippo: !!process.env.SHIPPO_API_KEY,
+    };
+  }
+
   @Patch()
   update(@Body() patch: Record<string, string>) {
     return this.siteSettingsService.update(patch);

@@ -1,20 +1,22 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Controller, Post, Body, Req, Headers } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
 
 // Public by design — Stripe/ShipStation/Shippo send their own signed
 // payloads, not a bearer token, so these can't sit behind JwtAuthGuard.
-// No signature verification is implemented yet (see webhooks.service.ts)
-// since none of these providers are actually connected — do not treat this
-// as production-ready until that's added.
+// Stripe requests are signature-verified in WebhooksService using the raw
+// body (see main.ts's express.raw() mount for /api/webhooks/stripe).
+// ShipStation/Shippo signature verification is still TODO (see
+// webhooks.service.ts) since those providers aren't connected yet.
 @ApiTags('Webhooks')
 @Controller('webhooks')
 export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}
 
   @Post('stripe')
-  stripe(@Body() event: any) {
-    return this.webhooksService.handleStripeEvent(event);
+  stripe(@Req() req: Request, @Headers('stripe-signature') signature: string) {
+    return this.webhooksService.handleStripeEvent(req.body as Buffer, signature);
   }
 
   @Post('shipstation')

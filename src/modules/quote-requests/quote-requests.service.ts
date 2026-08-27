@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuoteRequest, QuoteRequestItem, RequestStatus, RequestType } from '../../entities';
 import { CreateQuoteRequestDto } from './dto/create-quote-request.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class QuoteRequestsService {
@@ -13,6 +14,7 @@ export class QuoteRequestsService {
     private readonly quoteRequestsRepo: Repository<QuoteRequest>,
     @InjectRepository(QuoteRequestItem)
     private readonly itemsRepo: Repository<QuoteRequestItem>,
+    private readonly emailService: EmailService,
   ) {}
 
   findAll(status?: RequestStatus) {
@@ -43,6 +45,17 @@ export class QuoteRequestsService {
     this.logger.log(
       `New ${saved.type} request from ${saved.fullName} <${saved.email}>${saved.companyName ? ` (${saved.companyName})` : ''} — id=${saved.id}`,
     );
+
+    // Best-effort — a notification-email failure must never break the
+    // customer's actual quote request submission.
+    try {
+      await this.emailService.sendQuoteRequestNotification(saved);
+    } catch (err) {
+      this.logger.warn(
+        `Quote request notification threw unexpectedly for #${saved.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
     return saved;
   }
 

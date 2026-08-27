@@ -85,6 +85,13 @@ export class ProductVariant {
   @Column({ type: 'timestamptz', nullable: true })
   availableFrom: Date | null;
 
+  // Shipping weight in pounds, used to compute parcel weight for live Shippo
+  // rate quotes on international orders. Nullable — when unset, callers fall
+  // back to a 1 lb placeholder (Shippo requires a nonzero weight); that
+  // fallback is NOT a real weight, just a technical necessity.
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  weightLb: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

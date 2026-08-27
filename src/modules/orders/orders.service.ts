@@ -4,12 +4,55 @@ import { JwtService } from '@nestjs/jwt';
 import { In, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import axios from 'axios';
-import { Cart, Order, OrderItem, OrderStatus, ProductVariant } from '../../entities';
+import { Cart, Order, OrderItem, OrderStatus, ProductVariant, StockStatus } from '../../entities';
 import { getEffectivePrice } from '../../common/pricing.util';
 import { UsersService } from '../users/users.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { StripeService } from '../stripe/stripe.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
 import { CarrierCode, UpdateTrackingDto } from './dto/update-tracking.dto';
+import { SiteSettingsService } from '../site-settings/site-settings.service';
+import { ShipStationService } from '../shipstation/shipstation.service';
+import {
+  getStateName,
+  getZoneForState,
+  normalizeStateCode,
+} from './shipping-zones.constants';
+import {
+  FREE_SHIPPING_THRESHOLD,
+  US_REMOTE_BASE_RATE,
+  US_REMOTE_STATES,
+  US_ZONE_BASE_RATES,
+  calculateAdditionalItemSurcharge,
+  calculateInternationalParcelRates,
+  formatRateGroupLabel,
+  getInternationalShippingRateGroup,
+  isUnitedStates,
+  roundMoney,
+} from './shipping-rates.constants';
+
+const DEFAULT_WHOLESALE_MINIMUM = 250;
+
+export interface ShippingEstimateResult {
+  available: boolean;
+  canShip: boolean;
+  isDomestic: boolean;
+  shippingCost?: number;
+  zone?: number;
+  zoneName?: string;
+  regionLabel?: string;
+  shippingMethod?: string;
+  weightLb?: number;
+  subtotal: number;
+  wholesaleMinimum: number;
+  meetsMinimum: boolean;
+  minimumRemaining: number;
+  isFreeShipping?: boolean;
+  freeShippingThreshold?: number;
+  amountAwayFromFreeShipping?: number;
+  errorMessage?: string;
+}
 
 interface ShippoLocation {
   city?: string;
@@ -174,7 +217,183 @@ export class OrdersService {
     private readonly usersService: UsersService,
     private readonly couponsService: CouponsService,
     private readonly jwtService: JwtService,
+    private readonly stripeService: StripeService,
+    private readonly siteSettingsService: SiteSettingsService,
+    private readonly shipStationService: ShipStationService,
   ) {}
+
+  private async getWholesaleMinimum(): Promise<number> {
+    const raw = await this.siteSettingsService.getValue('WHOLESALE_MINIMUM');
+    const parsed = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_WHOLESALE_MINIMUM;
+  }
+
+  private async getFreeShippingThreshold(): Promise<number> {
+    const raw = await this.siteSettingsService.getValue('FREE_SHIPPING_THRESHOLD');
+    const parsed = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : FREE_SHIPPING_THRESHOLD;
+  }
+
+  // Public (no auth) — used pre-checkout, before an account/order exists, to
+  // show shipping cost + the wholesale-minimum banner as the customer fills
+  // in their address. Deterministic rate-table logic ported from the real
+  // cocojojo.com site's ShippingService (shipping.service.ts) — no live
+  // carrier API call, so it never depends on a configured SHIPPO_API_KEY and
+  // always matches the real site's numbers exactly. US destinations use the
+  // real zone-based flat-rate table (free past $85 subtotal); international
+  // destinations use the real UPS-estimate weight-band table per region
+  // group, and report `canShip: false` for any country outside those groups
+  // (matching the real site's "manual quote required" behavior) instead of
+  // guessing a number.
+  async getShippingEstimate(dto: ShippingEstimateDto): Promise<ShippingEstimateResult> {
+    const variantIds = dto.items.map((i) => i.productVariantId);
+    const variants = await this.variantsRepo.find({ where: { id: In(variantIds) } });
+    const variantsById = new Map(variants.map((v) => [v.id, v]));
+
+    let subtotal = 0;
+    let totalWeight = 0;
+    let totalQuantity = 0;
+    for (const item of dto.items) {
+      const variant = variantsById.get(item.productVariantId);
+      if (!variant) {
+        throw new BadRequestException(`Product variant #${item.productVariantId} not found`);
+      }
+      subtotal += Number(getEffectivePrice(variant)) * item.quantity;
+      // Not every variant has weightLb configured yet; 1 lb is a documented
+      // fallback (matches the real site's own fallback-weight behavior),
+      // not a claim about the item's real weight.
+      const weight = variant.weightLb != null ? Number(variant.weightLb) : 1;
+      totalWeight += weight * item.quantity;
+      totalQuantity += item.quantity;
+    }
+    subtotal = roundMoney(subtotal);
+    totalWeight = Number(totalWeight.toFixed(4));
+
+    const wholesaleMinimum = await this.getWholesaleMinimum();
+    const meetsMinimum = subtotal >= wholesaleMinimum;
+    const minimumRemaining = roundMoney(Math.max(wholesaleMinimum - subtotal, 0));
+    const isDomestic = isUnitedStates(dto.country);
+
+    if (!meetsMinimum) {
+      return {
+        available: true,
+        canShip: false,
+        isDomestic,
+        shippingCost: 0,
+        subtotal,
+        wholesaleMinimum,
+        meetsMinimum: false,
+        minimumRemaining,
+        errorMessage: `Minimum purchase is $${wholesaleMinimum.toFixed(2)}. Current subtotal is $${subtotal.toFixed(2)}.`,
+      };
+    }
+
+    const freeShippingThreshold = await this.getFreeShippingThreshold();
+    const isFreeShipping = subtotal >= freeShippingThreshold;
+    const amountAwayFromFreeShipping = roundMoney(Math.max(freeShippingThreshold - subtotal, 0));
+
+    if (isDomestic) {
+      const additionalItemSurcharge = calculateAdditionalItemSurcharge(totalQuantity);
+      const normalizedState = normalizeStateCode(dto.state || '');
+
+      if (US_REMOTE_STATES.has(normalizedState)) {
+        const shippingCost = isFreeShipping ? 0 : roundMoney(US_REMOTE_BASE_RATE + additionalItemSurcharge);
+        return {
+          available: true,
+          canShip: true,
+          isDomestic: true,
+          shippingCost,
+          zone: 9,
+          zoneName: 'Remote US',
+          shippingMethod: isFreeShipping ? 'Free Shipping' : 'Approximate Retail Shipping - Remote US',
+          weightLb: totalWeight,
+          subtotal,
+          wholesaleMinimum,
+          meetsMinimum: true,
+          minimumRemaining: 0,
+          isFreeShipping,
+          freeShippingThreshold,
+          amountAwayFromFreeShipping,
+        };
+      }
+
+      const zone = getZoneForState(normalizedState);
+      if (!zone) {
+        return {
+          available: true,
+          canShip: false,
+          isDomestic: true,
+          subtotal,
+          wholesaleMinimum,
+          meetsMinimum: true,
+          minimumRemaining: 0,
+          weightLb: totalWeight,
+          zoneName: normalizedState ? `Non-shipping area (${getStateName(normalizedState)})` : 'Unknown US state',
+          errorMessage: normalizedState
+            ? `We do not ship to ${getStateName(normalizedState)}.`
+            : 'A valid US shipping state is required to calculate shipping.',
+        };
+      }
+
+      const baseShippingCost = US_ZONE_BASE_RATES[zone];
+      const shippingCost = isFreeShipping ? 0 : roundMoney(baseShippingCost + additionalItemSurcharge);
+
+      return {
+        available: true,
+        canShip: true,
+        isDomestic: true,
+        shippingCost,
+        zone,
+        zoneName: `Zone ${zone}`,
+        shippingMethod: isFreeShipping ? 'Free Shipping' : 'Approximate Retail Shipping - US',
+        weightLb: totalWeight,
+        subtotal,
+        wholesaleMinimum,
+        meetsMinimum: true,
+        minimumRemaining: 0,
+        isFreeShipping,
+        freeShippingThreshold,
+        amountAwayFromFreeShipping,
+      };
+    }
+
+    // International
+    const rateGroup = getInternationalShippingRateGroup(dto.country);
+    if (!rateGroup) {
+      return {
+        available: true,
+        canShip: false,
+        isDomestic: false,
+        subtotal,
+        wholesaleMinimum,
+        meetsMinimum: true,
+        minimumRemaining: 0,
+        weightLb: totalWeight,
+        zoneName: 'International - Manual Quote',
+        shippingMethod: 'International Shipping - Manual Quote Required',
+        errorMessage: `Shipping to ${dto.country} requires a manual quote. Please contact us before payment.`,
+      };
+    }
+
+    const parcelRates = calculateInternationalParcelRates(totalWeight, rateGroup);
+    const regionLabel = `International - ${formatRateGroupLabel(rateGroup)}`;
+
+    return {
+      available: true,
+      canShip: true,
+      isDomestic: false,
+      shippingCost: parcelRates.shippingCost,
+      regionLabel: `Estimated UPS International Shipping (${regionLabel})`,
+      zoneName: regionLabel,
+      shippingMethod: 'Estimated UPS International Shipping',
+      weightLb: totalWeight,
+      subtotal,
+      wholesaleMinimum,
+      meetsMinimum: true,
+      minimumRemaining: 0,
+      isFreeShipping: false,
+    };
+  }
 
   // Re-validates a coupon server-side and applies its discount — never trusts
   // a client-sent discount amount. Returns null if no code was provided or it
@@ -250,6 +469,26 @@ export class OrdersService {
     }
   }
 
+  // Reserves inventory at order-placement time (not payment confirmation) —
+  // matches assertAvailability/assertOrderLimits already gating on the same
+  // snapshot of stock right before the order is created. Variants with no
+  // stockQuantity tracked (null = unlimited) are left untouched. Clamped at
+  // 0 rather than going negative, and flips stockStatus to OUT_OF_STOCK the
+  // same way resolveStockStatus (products.service.ts) derives it elsewhere,
+  // so the storefront immediately reflects the new stock level.
+  private async decrementStock(lines: { variant: ProductVariant; quantity: number }[]) {
+    for (const { variant, quantity } of lines) {
+      if (variant.stockQuantity == null) continue;
+      const remaining = Math.max(variant.stockQuantity - quantity, 0);
+      await this.variantsRepo.update(variant.id, {
+        stockQuantity: remaining,
+        ...(remaining <= 0 && variant.stockStatus !== StockStatus.ON_BACKORDER
+          ? { stockStatus: StockStatus.OUT_OF_STOCK }
+          : {}),
+      });
+    }
+  }
+
   findAllForUser(userId: number) {
     return this.ordersRepo.find({
       where: { userId },
@@ -293,6 +532,7 @@ export class OrdersService {
           productName: item.variant.product?.name || '',
           variantLabel: item.variant.label,
           sku: item.variant.sku,
+          imageUrl: item.variant.imageUrl || item.variant.product?.imageUrl || null,
           quantity: item.quantity,
           price: item.price,
           purchaseType: item.purchaseType,
@@ -313,7 +553,8 @@ export class OrdersService {
         price: Number(item.price),
       }));
       const couponResult = await this.applyCoupon(dto.couponCode, user.email, subtotal, cartItemsForCoupon);
-      const total = subtotal - (couponResult?.couponAmount || 0);
+      const shippingCost = dto.shippingCost ?? 0;
+      const total = subtotal - (couponResult?.couponAmount || 0) + shippingCost;
 
       order = this.ordersRepo.create({
         userId,
@@ -323,11 +564,13 @@ export class OrdersService {
         total: total.toFixed(2),
         couponId: couponResult?.couponId ?? null,
         couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
+        shippingCost: shippingCost.toFixed(2),
         shippingAddress,
         notes,
       });
 
       order = await this.ordersRepo.save(order);
+      await this.decrementStock(cartLines);
       await this.cartRepo.manager.remove(cart.items);
       if (couponResult) {
         await this.couponsService.incrementUsage(couponResult.couponId, user.email, order.id);
@@ -335,7 +578,11 @@ export class OrdersService {
       this.logger.log(
         `Order placed: #${order.id} by user ${userId} — ${orderItems.length} item(s), total $${order.total}`,
       );
-      return order;
+
+      const session = await this.stripeService.createCheckoutSession(order);
+      order.stripePaymentIntentId = session.payment_intent as string;
+      await this.ordersRepo.save(order);
+      return { order, checkoutUrl: session.url };
     }
 
     // Guest checkout: no DB cart exists — items come straight from the request body.
@@ -382,6 +629,7 @@ export class OrdersService {
         productName: variant.product?.name || '',
         variantLabel: variant.label,
         sku: variant.sku,
+        imageUrl: variant.imageUrl || variant.product?.imageUrl || null,
         quantity: reqItem.quantity,
         price: getEffectivePrice(variant),
       });
@@ -403,7 +651,8 @@ export class OrdersService {
       };
     });
     const couponResult = await this.applyCoupon(dto.couponCode, dto.guestEmail, subtotal, cartItemsForCoupon);
-    const total = subtotal - (couponResult?.couponAmount || 0);
+    const shippingCost = dto.shippingCost ?? 0;
+    const total = subtotal - (couponResult?.couponAmount || 0) + shippingCost;
 
     order = this.ordersRepo.create({
       userId: null,
@@ -416,11 +665,13 @@ export class OrdersService {
       total: total.toFixed(2),
       couponId: couponResult?.couponId ?? null,
       couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
+      shippingCost: shippingCost.toFixed(2),
       shippingAddress,
       notes,
     });
 
     order = await this.ordersRepo.save(order);
+    await this.decrementStock(guestLines);
     if (couponResult) {
       await this.couponsService.incrementUsage(couponResult.couponId, dto.guestEmail, order.id);
     }
@@ -466,7 +717,12 @@ export class OrdersService {
       }
     }
 
-    return accessToken ? { ...order, accessToken } : order;
+    const session = await this.stripeService.createCheckoutSession(order);
+    order.stripePaymentIntentId = session.payment_intent as string;
+    await this.ordersRepo.save(order);
+
+    const finalOrder = accessToken ? { ...order, accessToken } : order;
+    return { order: finalOrder, checkoutUrl: session.url };
   }
 
   // Admin/sales view: every order, joined to the placing user and their company,
@@ -636,6 +892,54 @@ export class OrdersService {
     } catch (err) {
       this.logger.warn(
         `Shippo auto shipment creation failed for order #${orderId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  /**
+   * Pushes an order to ShipStation right after payment capture, mirroring
+   * the real cocojojo.com site's SHIPSTATION completion-job case (see
+   * stripe-completion-worker.service.ts, ~line 220) which dedupes on
+   * order.shipstationOrderId and calls straight into ShipStationService.
+   * Complementary to createShipmentForOrder's Shippo call, not a
+   * replacement — see ShipStationService's class doc for why both run.
+   *
+   * Loads items + user (needed to build the ShipStation request payload,
+   * neither of which the bare findOne in createShipmentForOrder needs).
+   * Never throws — a ShipStation-side failure must never break Stripe
+   * webhook acknowledgment, matching createShipmentForOrder's convention.
+   */
+  async pushOrderToShipStation(orderId: number): Promise<void> {
+    const order = await this.ordersRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'user'],
+    });
+    if (!order) {
+      this.logger.warn(`pushOrderToShipStation: order #${orderId} not found — skipping.`);
+      return;
+    }
+
+    if (order.shipstationOrderId) {
+      this.logger.warn(
+        `Order #${orderId} already has a ShipStation order id (${order.shipstationOrderId}) — skipping duplicate push.`,
+      );
+      return;
+    }
+
+    try {
+      const shipstationOrderId = await this.shipStationService.createOrder(order);
+      if (!shipstationOrderId) {
+        // ShipStationService already logged the specific reason
+        // (not configured / API error / no orderId in response).
+        return;
+      }
+
+      order.shipstationOrderId = shipstationOrderId;
+      await this.ordersRepo.save(order);
+      this.logger.log(`Order #${orderId} shipstationOrderId persisted: ${shipstationOrderId}`);
+    } catch (err) {
+      this.logger.warn(
+        `ShipStation push threw unexpectedly for order #${orderId}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }

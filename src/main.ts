@@ -9,7 +9,14 @@ import { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // bodyParser disabled here so we can register express.raw() for the Stripe
+  // webhook path BEFORE Nest's default express.json() parser would otherwise
+  // consume/parse that route's body first (Nest registers its body parser
+  // globally during NestFactory.create, which runs ahead of anything we add
+  // via app.use afterwards — so the only reliable fix is to opt out of the
+  // default parser and register both explicitly, raw() for the Stripe path
+  // first, json() for everything else).
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   app.enableCors({
     origin: '*',
@@ -35,6 +42,15 @@ async function bootstrap() {
   app.use('/api/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads')));
   app.use('/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads')));
 
+  // Stripe requires the raw request body to verify webhook signatures.
+  // Registered first (and bodyParser is disabled above) so this route's body
+  // arrives as an untouched Buffer instead of being parsed as JSON.
+  app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
+  // Every other route gets the normal JSON body parser that Nest would
+  // otherwise have registered automatically.
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -53,9 +69,28 @@ async function bootstrap() {
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
-  const port = process.env.PORT || 4000;
-  await app.listen(port);
+  const startPort = Number(process.env.PORT) || 4000;
+  const port = await listenOnFirstFreePort(app, startPort);
   console.log(`cocojojochem backend running on http://localhost:${port}/api`);
   console.log(`Swagger docs at http://localhost:${port}/api/docs`);
 }
 bootstrap();
+
+// Tries `startPort`, then startPort+1, startPort+2, ... until one binds
+// successfully — so a stray leftover process on 4000 doesn't block startup.
+async function listenOnFirstFreePort(app: import('@nestjs/common').INestApplication, startPort: number, maxAttempts = 10): Promise<number> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = startPort + i;
+    try {
+      await app.listen(port);
+      return port;
+    } catch (err: any) {
+      if (err?.code === 'EADDRINUSE') {
+        console.warn(`Port ${port} is already in use — trying ${port + 1}...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`Could not find a free port after trying ${startPort}-${startPort + maxAttempts - 1}`);
+}

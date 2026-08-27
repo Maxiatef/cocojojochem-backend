@@ -83,6 +83,13 @@ export class Order {
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   couponAmount: string;
 
+  // Actual shipping amount charged, computed by /orders/shipping-estimate and
+  // passed through checkout. Always 0.00 for US orders (free shipping past
+  // the wholesale minimum); a real Shippo-derived UPS International rate for
+  // qualifying international orders.
+  @Column('decimal', { precision: 10, scale: 2, default: 0 })
+  shippingCost: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

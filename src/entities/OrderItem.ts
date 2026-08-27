@@ -32,6 +32,9 @@ export class OrderItem {
   @Column()
   sku: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  imageUrl: string | null;
+
   @Column()
   quantity: number;
 

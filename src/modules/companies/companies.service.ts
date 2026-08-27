@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AccountStatus, Company, Order, QuoteRequest } from '../../entities';
+import { Company, Order, QuoteRequest } from '../../entities';
 
 @Injectable()
 export class CompaniesService {
@@ -26,12 +26,6 @@ export class CompaniesService {
       .getMany();
   }
 
-  async getStats() {
-    const total = await this.companiesRepo.count();
-    const pending = await this.companiesRepo.count({ where: { status: AccountStatus.PENDING } });
-    return { total, pending };
-  }
-
   async findById(id: number) {
     const company = await this.companiesRepo.findOne({ where: { id }, relations: ['users'] });
     if (!company) throw new NotFoundException(`Company #${id} not found`);
@@ -42,15 +36,6 @@ export class CompaniesService {
     const company = this.companiesRepo.create(data);
     const saved = await this.companiesRepo.save(company);
     this.logger.log(`Company created: "${saved.name}" (id=${saved.id}, status=${saved.status})`);
-    return saved;
-  }
-
-  async setStatus(id: number, status: AccountStatus) {
-    const company = await this.findById(id);
-    const previousStatus = company.status;
-    company.status = status;
-    const saved = await this.companiesRepo.save(company);
-    this.logger.log(`Company "${saved.name}" (id=${id}) status changed: ${previousStatus} -> ${status}`);
     return saved;
   }
 

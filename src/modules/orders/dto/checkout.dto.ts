@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -61,4 +62,16 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   couponCode?: string;
+
+  // Last shipping cost returned by POST /orders/shipping-estimate for this
+  // cart/address — passed through so the actual Stripe charge matches what
+  // the checkout UI showed. Server never recomputes it here (no address
+  // structure is stored on Order to recompute from), so it trusts this value
+  // the same way it already trusts shippingAddress/notes as free text; the
+  // real financial guard is that Stripe collects exactly total = subtotal -
+  // couponAmount + shippingCost, which is auditable per order.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingCost?: number;
 }

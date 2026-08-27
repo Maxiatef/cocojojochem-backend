@@ -19,6 +19,11 @@ export class SiteSettingsService {
     return { settings: flat, rows };
   }
 
+  async getValue(key: string): Promise<string | null> {
+    const row = await this.settingsRepo.findOne({ where: { key } });
+    return row ? row.value : null;
+  }
+
   async update(patch: Record<string, string>) {
     const keys = Object.keys(patch);
     for (const key of keys) {

@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
 @ApiTags('Cart')
 @ApiBearerAuth('access-token')
@@ -46,9 +47,9 @@ export class CartController {
   updateItem(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
-    @Body('quantity') quantity: number,
+    @Body() dto: UpdateCartItemDto,
   ) {
-    return this.cartService.updateItemQuantity(req.user.id, id, quantity);
+    return this.cartService.updateItemQuantity(req.user.id, id, dto.quantity);
   }
 
   @Delete('items/:id')
