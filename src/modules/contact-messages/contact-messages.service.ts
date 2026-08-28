@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ContactMessage, ContactMessageStatus } from '../../entities';
 import { CreateContactMessageDto } from './dto/create-contact-message.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class ContactMessagesService {
@@ -11,12 +12,22 @@ export class ContactMessagesService {
   constructor(
     @InjectRepository(ContactMessage)
     private readonly messagesRepo: Repository<ContactMessage>,
+    private readonly emailService: EmailService,
   ) {}
 
   async create(dto: CreateContactMessageDto) {
     const message = this.messagesRepo.create({ ...dto, status: ContactMessageStatus.UNREAD });
     const saved = await this.messagesRepo.save(message);
     this.logger.log(`New contact message from ${saved.fullName} <${saved.email}> — id=${saved.id}`);
+
+    try {
+      await this.emailService.sendContactMessageNotification(saved);
+    } catch (err) {
+      this.logger.warn(
+        `Contact-message notification threw unexpectedly for message #${saved.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
     return saved;
   }
 

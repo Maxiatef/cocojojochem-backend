@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -11,6 +13,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../entities';
 import { CompaniesService } from './companies.service';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @ApiTags('Companies')
 @ApiBearerAuth('access-token')
@@ -29,6 +32,12 @@ export class CompaniesController {
   @Roles(UserRole.ADMIN, UserRole.SALES)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.companiesService.findById(id);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.ADMIN)
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCompanyDto) {
+    return this.companiesService.update(id, dto);
   }
 
   @Get(':id/orders')

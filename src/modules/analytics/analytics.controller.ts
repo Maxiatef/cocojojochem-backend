@@ -18,4 +18,9 @@ export class AnalyticsController {
   getSalesAndProducts(@Query('days') days?: string) {
     return this.analyticsService.getSalesAndProducts(days ? Number(days) : 30);
   }
+
+  @Get('visitors')
+  getVisitors(@Query('days') days?: string) {
+    return this.analyticsService.getVisitors(days ? Number(days) : 30);
+  }
 }

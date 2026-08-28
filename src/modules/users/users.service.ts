@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { Order, User, UserRole } from '../../entities';
+import { Order, QuoteRequest, User, UserRole } from '../../entities';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -14,10 +14,23 @@ export class UsersService {
     private readonly usersRepo: Repository<User>,
     @InjectRepository(Order)
     private readonly ordersRepo: Repository<Order>,
+    @InjectRepository(QuoteRequest)
+    private readonly quoteRequestsRepo: Repository<QuoteRequest>,
   ) {}
 
   findByEmail(email: string) {
     return this.usersRepo.findOne({ where: { email }, relations: ['company'] });
+  }
+
+  // Backs the clickable role stat cards atop the admin Users page.
+  async getStats() {
+    const [total, customers, sales, admins] = await Promise.all([
+      this.usersRepo.count(),
+      this.usersRepo.count({ where: { role: UserRole.CUSTOMER } }),
+      this.usersRepo.count({ where: { role: UserRole.SALES } }),
+      this.usersRepo.count({ where: { role: UserRole.ADMIN } }),
+    ]);
+    return { total, customers, sales, admins };
   }
 
   async findById(id: number) {
@@ -69,7 +82,7 @@ export class UsersService {
     qb.offset((page - 1) * limit).limit(limit);
 
     const { entities, raw } = await qb.getRawAndEntities();
-    const data = entities.map((user, i) => ({
+    const data = entities.map(({ passwordHash, ...user }, i) => ({
       ...user,
       orderCount: Number(raw[i]?.orderCount || 0),
       totalSpent: Number(raw[i]?.totalSpent || 0),
@@ -91,12 +104,19 @@ export class UsersService {
   }
 
   async findDetail(id: number) {
-    const user = await this.findById(id);
-    const recentOrders = await this.ordersRepo.find({
+    const { passwordHash, ...user } = await this.findById(id);
+    // Full order history, not just a recent slice — the admin edit page
+    // shows every order's full detail (items, shipping, tracking, totals)
+    // for this user, so nothing should be silently truncated.
+    const orders = await this.ordersRepo.find({
       where: { userId: id },
       relations: ['items'],
       order: { createdAt: 'DESC' },
-      take: 10,
+    });
+    const quoteRequests = await this.quoteRequestsRepo.find({
+      where: { userId: id },
+      relations: ['items'],
+      order: { createdAt: 'DESC' },
     });
     const [orderCountRaw, totalSpentRaw] = await Promise.all([
       this.ordersRepo.count({ where: { userId: id } }),
@@ -108,10 +128,11 @@ export class UsersService {
     ]);
     return {
       ...user,
-      recentOrders,
+      orders,
+      quoteRequests,
       orderCount: orderCountRaw,
       totalSpent: Number(totalSpentRaw?.total || 0),
-      lastOrderDate: recentOrders[0]?.createdAt ?? null,
+      lastOrderDate: orders[0]?.createdAt ?? null,
     };
   }
 

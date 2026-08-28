@@ -115,6 +115,13 @@ export class WebhooksService {
             `Order confirmation email threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
           );
         }
+        try {
+          await this.emailService.sendNewOrderInternalNotification(order);
+        } catch (err) {
+          this.logger.warn(
+            `New-order internal notification threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
       }
       return { received: true };
     }
@@ -165,6 +172,13 @@ export class WebhooksService {
           } catch (err) {
             this.logger.warn(
               `Order confirmation email threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+          try {
+            await this.emailService.sendNewOrderInternalNotification(order);
+          } catch (err) {
+            this.logger.warn(
+              `New-order internal notification threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
             );
           }
         }

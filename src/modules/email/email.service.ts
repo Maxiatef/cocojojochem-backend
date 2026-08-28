@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as brevo from '@getbrevo/brevo';
-import { Order, QuoteRequest } from '../../entities';
+import { ContactMessage, Order, QuoteRequest } from '../../entities';
 import { SiteSettingsService } from '../site-settings/site-settings.service';
 
 /**
@@ -26,7 +26,24 @@ export class EmailService {
 
   constructor(private readonly siteSettingsService: SiteSettingsService) {}
 
+  // Same admin-toggle + admin-set-recipient pattern as
+  // sendNewOrderInternalNotification below — no hardcoded fallback email,
+  // and an explicit "false" on the enabled setting skips sending entirely.
   async sendQuoteRequestNotification(quoteRequest: QuoteRequest): Promise<void> {
+    const enabledSetting = await this.siteSettingsService.getValue('quoteNotificationEnabled');
+    if (enabledSetting === 'false') {
+      this.logger.log(`Quote-request notifications are disabled — skipping for quote request #${quoteRequest.id}.`);
+      return;
+    }
+
+    const notifyEmail = await this.siteSettingsService.getValue('quoteNotificationEmail');
+    if (!notifyEmail) {
+      this.logger.warn(
+        `No quote-request notification email configured (Admin Settings → Emails) — skipping for quote request #${quoteRequest.id}.`,
+      );
+      return;
+    }
+
     const apiKey = process.env.BREVO_API_KEY;
     if (!apiKey) {
       this.logger.warn(
@@ -35,10 +52,6 @@ export class EmailService {
       return;
     }
 
-    // DB-backed setting (editable in Admin Settings → Emails) takes priority
-    // over the env var, which stays as a deploy-time fallback default.
-    const settingEmail = await this.siteSettingsService.getValue('quoteNotificationEmail');
-    const notifyEmail = settingEmail || process.env.QUOTE_NOTIFICATION_EMAIL || 'sales@cocojojochem.com';
     const subject = `New Quote Request #${quoteRequest.id} — ${quoteRequest.fullName}`;
     const html = this.buildQuoteRequestEmail(quoteRequest);
 
@@ -48,6 +61,45 @@ export class EmailService {
     } catch (err) {
       this.logger.warn(
         `Failed to send new-quote-request notification for #${quoteRequest.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  // Same admin-toggle + admin-set-recipient pattern as the other
+  // notifications. Previously nothing was sent at all when a customer
+  // submitted the Contact Us form — this closes that gap.
+  async sendContactMessageNotification(message: ContactMessage): Promise<void> {
+    const enabledSetting = await this.siteSettingsService.getValue('contactMessageNotificationEnabled');
+    if (enabledSetting === 'false') {
+      this.logger.log(`Contact-message notifications are disabled — skipping for contact message #${message.id}.`);
+      return;
+    }
+
+    const notifyEmail = await this.siteSettingsService.getValue('contactMessageNotificationEmail');
+    if (!notifyEmail) {
+      this.logger.warn(
+        `No contact-message notification email configured (Admin Settings → Emails) — skipping for contact message #${message.id}.`,
+      );
+      return;
+    }
+
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      this.logger.warn(
+        `BREVO_API_KEY not configured — skipping contact-message notification for contact message #${message.id}.`,
+      );
+      return;
+    }
+
+    const subject = `New Contact Message #${message.id} — ${message.subject}`;
+    const html = this.buildContactMessageEmail(message);
+
+    try {
+      await this.sendEmailWithBrevo(apiKey, notifyEmail, subject, html);
+      this.logger.log(`Contact-message notification sent for #${message.id} to ${notifyEmail}.`);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send contact-message notification for #${message.id}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }
@@ -73,6 +125,49 @@ export class EmailService {
     } catch (err) {
       this.logger.warn(
         `Failed to send order confirmation email for #${order.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  // Internal notification to the sales team, separate from the
+  // customer-facing sendOrderConfirmationEmail above — same trigger point
+  // (Stripe payment success), just a different audience/subject/template,
+  // mirroring the sendQuoteRequestNotification pattern. Both the on/off
+  // toggle and the recipient address are admin-settable (Admin Settings →
+  // Emails) — no hardcoded fallback email; if the admin hasn't set one yet,
+  // this honestly skips rather than guessing a destination.
+  async sendNewOrderInternalNotification(order: Order): Promise<void> {
+    const enabledSetting = await this.siteSettingsService.getValue('newOrderNotificationEnabled');
+    if (enabledSetting === 'false') {
+      this.logger.log(`New-order internal notifications are disabled — skipping for order #${order.id}.`);
+      return;
+    }
+
+    const notifyEmail = await this.siteSettingsService.getValue('newOrderNotificationEmail');
+    if (!notifyEmail) {
+      this.logger.warn(
+        `No new-order notification email configured (Admin Settings → Emails) — skipping for order #${order.id}.`,
+      );
+      return;
+    }
+
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      this.logger.warn(
+        `BREVO_API_KEY not configured — skipping new-order internal notification for order #${order.id}.`,
+      );
+      return;
+    }
+
+    const subject = `COCOJOJOCHEM - New Order #${order.id}`;
+    const html = this.buildNewOrderNotificationEmail(order);
+
+    try {
+      await this.sendEmailWithBrevo(apiKey, notifyEmail, subject, html, 'CocoJojoChem Orders');
+      this.logger.log(`New-order internal notification sent for #${order.id} to ${notifyEmail}.`);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send new-order internal notification for #${order.id}: ${err instanceof Error ? err.message : err}`,
       );
     }
   }
@@ -209,6 +304,119 @@ export class EmailService {
 
         <div class="footer">
             <p>This is an automated confirmation email for order #${order.id}</p>
+            <p>CocoJojoChem</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  private buildNewOrderNotificationEmail(order: Order): string {
+    const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
+    const customerName = order.user?.fullName || order.guestName || 'Guest';
+    const customerEmail = order.user?.email || order.guestEmail || '—';
+    const formatDate = (date: Date) =>
+      new Date(date).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+    const itemRows = (order.items || [])
+      .map((item) => {
+        const unitPrice = Number(item.price);
+        const lineTotal = unitPrice * item.quantity;
+        return `
+      <tr>
+        <td style="padding: 10px; border-bottom: 1px solid #eee;">
+          <strong>${escapeHtml(item.productName)}</strong>${item.variantLabel ? ` — ${escapeHtml(item.variantLabel)}` : ''}
+          ${item.sku ? `<br><small>SKU: ${escapeHtml(item.sku)}</small>` : ''}
+        </td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(unitPrice)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(lineTotal)}</td>
+      </tr>`;
+      })
+      .join('');
+
+    const subtotal = Number(order.subtotal);
+    const shippingCost = Number(order.shippingCost);
+    const couponAmount = Number(order.couponAmount);
+    const total = Number(order.total);
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>COCOJOJOCHEM - New Order #${order.id}</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #16241c; margin: 0; padding: 0; background: #ffffff; }
+        .container { max-width: 600px; margin: 0 auto; padding: 32px 24px; background: #ffffff; }
+        .brand { font-size: 11px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #6b7a70; margin-bottom: 24px; }
+        h1 { margin: 0 0 4px 0; font-size: 24px; color: #16241c; font-weight: 600; }
+        .subhead { margin: 0 0 24px 0; color: #6b7a70; font-size: 14px; }
+        .meta-table { width: 100%; font-size: 14px; }
+        .meta-table td { padding: 3px 0; }
+        .meta-label { color: #6b7a70; }
+        .order-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        .order-table th { border-bottom: 2px solid #16241c; padding: 8px 0; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7a70; font-weight: 600; }
+        .order-table td { padding: 12px 0; border-bottom: 1px solid #e5e1d8; font-size: 14px; }
+        .totals-table { width: 100%; margin-top: 8px; font-size: 14px; }
+        .totals-table td { padding: 5px 0; }
+        .grand-total { font-weight: 700; font-size: 16px; border-top: 1px solid #16241c; padding-top: 10px !important; }
+        .box { border: 1px solid #e5e1d8; padding: 16px; margin: 16px 0; font-size: 14px; }
+        .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #16241c; margin: 24px 0 8px 0; }
+        .btn { display: inline-block; background-color: #3a5a40; color: #ffffff !important; padding: 11px 22px; text-decoration: none; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; margin-top: 16px; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e1d8; font-size: 12px; color: #6b7a70; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p class="brand">CocoJojoChem</p>
+        <h1>New Order Received</h1>
+        <p class="subhead">Order #${order.id} was just placed and paid.</p>
+
+        <table class="meta-table">
+            <tr><td class="meta-label">Order Number</td><td style="text-align: right;">#${order.id}</td></tr>
+            <tr><td class="meta-label">Order Date</td><td style="text-align: right;">${formatDate(order.createdAt)}</td></tr>
+            <tr><td class="meta-label">Customer</td><td style="text-align: right;">${escapeHtml(customerName)}</td></tr>
+            <tr><td class="meta-label">Email</td><td style="text-align: right;">${escapeHtml(customerEmail)}</td></tr>
+        </table>
+
+        <p class="section-title">Order Items</p>
+        <table class="order-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th style="text-align: center;">Qty</th>
+                    <th style="text-align: right;">Unit Price</th>
+                    <th style="text-align: right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+        </table>
+
+        <table class="totals-table">
+            <tr><td>Subtotal</td><td style="text-align: right;">${formatCurrency(subtotal)}</td></tr>
+            ${couponAmount > 0 ? `<tr><td>Discount</td><td style="text-align: right;">-${formatCurrency(couponAmount)}</td></tr>` : ''}
+            <tr><td>Shipping</td><td style="text-align: right;">${shippingCost > 0 ? formatCurrency(shippingCost) : 'Free'}</td></tr>
+            <tr class="grand-total"><td>Order Total</td><td style="text-align: right;">${formatCurrency(total)}</td></tr>
+        </table>
+
+        ${
+          order.shippingAddress
+            ? `<p class="section-title">Shipping Address</p>
+        <div class="box" style="white-space: pre-line;">${escapeHtml(order.shippingAddress)}</div>`
+            : ''
+        }
+
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/orders" class="btn">View in Admin Dashboard</a>
+
+        <div class="footer">
+            <p>This is an automated internal notification for order #${order.id}</p>
             <p>CocoJojoChem</p>
         </div>
     </div>
@@ -383,6 +591,33 @@ export class EmailService {
     }
     <p style="margin-top:24px;">
       <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/quote-requests"
+         style="display:inline-block;padding:10px 20px;background:#3a9640;color:#fff;text-decoration:none;border-radius:4px;">
+        View in admin dashboard
+      </a>
+    </p>
+  </div>
+</body>
+</html>`;
+  }
+
+  private buildContactMessageEmail(message: ContactMessage): string {
+    return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>New Contact Message</title></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+  <div style="max-width:600px;margin:0 auto;padding:20px;">
+    <h2 style="margin-bottom:4px;">New contact message — #${message.id}</h2>
+    <p style="color:#666;margin-top:0;">Subject: ${escapeHtml(message.subject)}</p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Name</td><td style="padding:4px 0;">${escapeHtml(message.fullName)}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Email</td><td style="padding:4px 0;">${escapeHtml(message.email)}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Phone</td><td style="padding:4px 0;">${message.phone ? escapeHtml(message.phone) : '—'}</td></tr>
+    </table>
+    <h3 style="margin-bottom:6px;">Message</h3>
+    <p style="white-space:pre-line;background:#f8f9fa;padding:12px;border-radius:4px;">${escapeHtml(message.message)}</p>
+    <p style="margin-top:24px;">
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/messages"
          style="display:inline-block;padding:10px 20px;background:#3a9640;color:#fff;text-decoration:none;border-radius:4px;">
         View in admin dashboard
       </a>

@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUrl, Matches, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -22,4 +22,8 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   companyName?: string;
+
+  @IsOptional()
+  @IsUrl({ require_protocol: false }, { message: 'Enter a valid website URL (e.g. yourcompany.com)' })
+  companyWebsite?: string;
 }

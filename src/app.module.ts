@@ -33,6 +33,7 @@ import {
   SiteSetting,
   SeoMetric,
   SeoIssue,
+    PageView,
 } from './entities';
 
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -54,6 +55,7 @@ import { ContactMessagesModule } from './modules/contact-messages/contact-messag
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { BulkSalesModule } from './modules/bulk-sales/bulk-sales.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { TrackingModule } from './modules/tracking/tracking.module';
 // SeoPagesModule is disabled — no admin UI edits SeoPage rows anymore (the
 // Meta Tags editor tab on /admin/seo was removed). Left commented, not
 // deleted, so it can be re-enabled later. Note: with this commented out,
@@ -116,6 +118,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
         SiteSetting,
         SeoMetric,
         SeoIssue,
+    PageView,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: true,
@@ -141,6 +144,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     CouponsModule,
     BulkSalesModule,
     AnalyticsModule,
+    TrackingModule,
     // SeoPagesModule, // disabled — see comment above the import
     SiteSettingsModule,
     SeoAnalyzerModule,

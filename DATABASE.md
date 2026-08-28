@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-31 tables in the `cocojojochem` Postgres database, grouped by purpose. Each maps to a TypeORM entity in [src/entities](src/entities).
+32 tables in the `cocojojochem` Postgres database, grouped by purpose. Each maps to a TypeORM entity in [src/entities](src/entities).
 
 ## Catalog (the wholesale product data)
 
@@ -103,6 +103,9 @@ One row per analyzed storefront path — title/meta description/H1 snapshot, wor
 
 ### `seo_issues`
 Individual flagged problems found by the SEO analyzer for a given path (missing title, missing meta description, missing/multiple H1, thin content, missing alt text), each with a severity and an `isFixed` flag an admin can toggle once addressed.
+
+### `page_views`
+One row per storefront page load, recorded by a public `POST /track/pageview` call the frontend fires on every route change (storefront only — admin pages are never tracked). Each row is just `path` + `visitorId` + `createdAt`. `visitorId` is a random UUID the browser generates once and keeps in `localStorage` — it isn't a user account or any other real identity, it exists purely so `GET /admin/analytics/visitors` can tell "3 page views" apart from "3 different people." In-house replacement for a third-party analytics SDK (no Google Analytics/Plausible/etc. — nothing like that is wired up).
 
 ### `site_settings`
 Generic key/value configuration store (`PATCH /site-settings`, admin-only) — every value is a plain string keyed by an arbitrary string key. Backs the admin Settings page's General/Company & Warehouse/Wholesale & Shipping/Tax/Emails tabs (e.g. `siteName`, `WHOLESALE_MINIMUM`, `FREE_SHIPPING_THRESHOLD`, `warehouseCity`, `quoteNotificationEmail`, `senderEmail`, `tax.name`). Not every key backend logic reads is guaranteed to have a row — `SiteSettingsService.getValue()` returns `null` for an unset key, and callers fall back to an env var or hardcoded default in that case.

@@ -53,6 +53,7 @@ export class AuthService {
     if (dto.companyName) {
       const company = await this.companiesService.create({
         name: dto.companyName,
+        website: dto.companyWebsite || null,
         status: AccountStatus.PENDING,
       });
       companyId = company.id;

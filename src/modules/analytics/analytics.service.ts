@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Order, OrderItem, OrderStatus, Product, ProductVariant, StockStatus } from '../../entities';
+import { Order, OrderItem, OrderStatus, PageView, Product, ProductVariant, StockStatus } from '../../entities';
 
 // Same worst-case precedence used across the admin (products list, dashboard):
 // a single OUT_OF_STOCK variant dominates the whole product's badge, then
@@ -19,7 +19,59 @@ export class AnalyticsService {
     @InjectRepository(OrderItem) private readonly orderItemsRepo: Repository<OrderItem>,
     @InjectRepository(Product) private readonly productsRepo: Repository<Product>,
     @InjectRepository(ProductVariant) private readonly variantsRepo: Repository<ProductVariant>,
+    @InjectRepository(PageView) private readonly pageViewsRepo: Repository<PageView>,
   ) {}
+
+  async getVisitors(daysRaw: number) {
+    const days = [7, 30, 90, 365].includes(daysRaw) ? daysRaw : 30;
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const [series, totals, topPages] = await Promise.all([
+      // Unique visitors and raw view count per day.
+      this.pageViewsRepo
+        .createQueryBuilder('pv')
+        .select("DATE_TRUNC('day', pv.createdAt)", 'day')
+        .addSelect('COUNT(DISTINCT pv.visitorId)', 'uniqueVisitors')
+        .addSelect('COUNT(*)', 'views')
+        .where('pv.createdAt >= :from', { from })
+        .groupBy('day')
+        .orderBy('day', 'ASC')
+        .getRawMany<{ day: Date; uniqueVisitors: string; views: string }>(),
+      this.pageViewsRepo
+        .createQueryBuilder('pv')
+        .select('COUNT(DISTINCT pv.visitorId)', 'uniqueVisitors')
+        .addSelect('COUNT(*)', 'views')
+        .where('pv.createdAt >= :from', { from })
+        .getRawOne<{ uniqueVisitors: string; views: string }>(),
+      this.pageViewsRepo
+        .createQueryBuilder('pv')
+        .select('pv.path', 'path')
+        .addSelect('COUNT(*)', 'views')
+        .addSelect('COUNT(DISTINCT pv.visitorId)', 'uniqueVisitors')
+        .where('pv.createdAt >= :from', { from })
+        .groupBy('pv.path')
+        .orderBy('views', 'DESC')
+        .limit(10)
+        .getRawMany<{ path: string; views: string; uniqueVisitors: string }>(),
+    ]);
+
+    return {
+      range: { days, from: from.toISOString(), to: to.toISOString() },
+      totalViews: Number(totals?.views || 0),
+      totalUniqueVisitors: Number(totals?.uniqueVisitors || 0),
+      series: series.map((row) => ({
+        day: row.day,
+        views: Number(row.views),
+        uniqueVisitors: Number(row.uniqueVisitors),
+      })),
+      topPages: topPages.map((row) => ({
+        path: row.path,
+        views: Number(row.views),
+        uniqueVisitors: Number(row.uniqueVisitors),
+      })),
+    };
+  }
 
   async getSalesAndProducts(daysRaw: number) {
     const days = [7, 30, 90, 365].includes(daysRaw) ? daysRaw : 30;

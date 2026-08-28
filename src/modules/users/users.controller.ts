@@ -42,10 +42,27 @@ export class UsersController {
     return this.usersService.createStaff(dto);
   }
 
+  // Declared before ':id' — 'admin' would otherwise be swallowed as an id
+  // and rejected by ParseIntPipe on that route.
+  @Get('admin/stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  getStats() {
+    return this.usersService.getStats();
+  }
+
+  // Was guarded only by JwtAuthGuard (no role check) and returned the raw
+  // User entity including passwordHash — any logged-in customer could fetch
+  // any other user's record, hash included, just by guessing an id. Not
+  // called by the frontend at all (dead client-side); locked down and the
+  // hash stripped rather than removed outright, in case something external
+  // depends on this route existing.
   @Get(':id')
-  @UseGuards(JwtAuthGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.findById(id);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const { passwordHash, ...safeUser } = await this.usersService.findById(id);
+    return safeUser;
   }
 
   @Get(':id/detail')
