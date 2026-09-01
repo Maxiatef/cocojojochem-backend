@@ -22,6 +22,7 @@ import { OrdersService } from './orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTrackingDto } from './dto/update-tracking.dto';
 import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
+import { ZONE_BY_STATE, US_STATE_NAMES } from './shipping-zones.constants';
 
 class UpdateOrderStatusDto {
   @IsEnum(OrderStatus)
@@ -44,6 +45,33 @@ export class OrdersController {
     @Query('limit') limit = '20',
   ) {
     return this.ordersService.findAllAdmin(status, Number(page), Number(limit));
+  }
+
+  // Declared before ':id' — 'admin' as a numeric id would 400 on ParseIntPipe.
+  @Get('admin/stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
+  getAdminStats() {
+    return this.ordersService.getAdminStats();
+  }
+
+  // Read-only reference data for the admin Shipping settings screen: which
+  // states fall in each zone (fixed — not editable here). The actual $
+  // rate tables those zones are priced from are admin-editable and served
+  // by GET /admin/shipping-rate-tiers?kind=WEIGHT|DRUM instead.
+  @Get('admin/shipping-reference')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
+  getShippingReference() {
+    const zones = Array.from({ length: 7 }, (_, i) => i + 1).map((zone) => ({
+      zone,
+      states: Object.entries(ZONE_BY_STATE)
+        .filter(([, z]) => z === zone)
+        .map(([code]) => ({ code, name: US_STATE_NAMES[code] || code }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+
+    return { zones };
   }
 
   @Patch(':id/status')

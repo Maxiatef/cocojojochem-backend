@@ -68,6 +68,17 @@ export class CreateVariantDto {
   @IsOptional()
   @IsDateString()
   availableFrom?: string;
+
+  // Shipping weight in lb — used by the domestic zone+weight shipping table.
+  @IsOptional()
+  @IsNumber()
+  weightLb?: number;
+
+  // When true, this variant is priced via the drum shipping table (per-drum
+  // flat rate by zone) instead of the regular per-lb weight table.
+  @IsOptional()
+  @IsBoolean()
+  isSoldByDrum?: boolean;
 }
 
 export class GalleryImageDto {

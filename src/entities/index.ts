@@ -28,3 +28,4 @@ export * from './SiteSetting';
 export * from './SeoMetric';
 export * from './SeoIssue';
 export * from './PageView';
+export * from './ShippingRateTier';

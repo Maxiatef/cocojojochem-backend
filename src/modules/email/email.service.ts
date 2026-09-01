@@ -129,6 +129,31 @@ export class EmailService {
     }
   }
 
+  async sendOrderCancelledEmail(order: Order): Promise<void> {
+    const apiKey = process.env.BREVO_API_KEY;
+    const email = order.user?.email || order.guestEmail;
+    if (!email) {
+      this.logger.warn(`Order #${order.id} has no email on file — skipping cancellation email.`);
+      return;
+    }
+    if (!apiKey) {
+      this.logger.warn(`BREVO_API_KEY not configured — skipping cancellation email for order #${order.id}.`);
+      return;
+    }
+
+    const subject = `Order #${order.id} Cancelled — CocoJojoChem`;
+    const html = this.buildOrderCancelledEmail(order, email);
+
+    try {
+      await this.sendEmailWithBrevo(apiKey, email, subject, html, 'CocoJojoChem Orders');
+      this.logger.log(`Order cancellation email sent for #${order.id} to ${email}.`);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send order cancellation email for #${order.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
   // Internal notification to the sales team, separate from the
   // customer-facing sendOrderConfirmationEmail above — same trigger point
   // (Stripe payment success), just a different audience/subject/template,
@@ -304,6 +329,79 @@ export class EmailService {
 
         <div class="footer">
             <p>This is an automated confirmation email for order #${order.id}</p>
+            <p>CocoJojoChem</p>
+        </div>
+    </div>
+</body>
+</html>`;
+  }
+
+  private buildOrderCancelledEmail(order: Order, email: string): string {
+    const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
+    const name = order.user?.fullName || order.guestName || 'there';
+
+    const itemRows = (order.items || [])
+      .map(
+        (item) => `
+      <tr>
+        <td style="padding: 10px; border-bottom: 1px solid #eee;">
+          <strong>${escapeHtml(item.productName)}</strong>${item.variantLabel ? ` — ${escapeHtml(item.variantLabel)}` : ''}
+          ${item.sku ? `<br><small>SKU: ${escapeHtml(item.sku)}</small>` : ''}
+        </td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(Number(item.price) * item.quantity)}</td>
+      </tr>`,
+      )
+      .join('');
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Order #${order.id} Cancelled</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #16241c; margin: 0; padding: 0; background: #ffffff; }
+        .container { max-width: 600px; margin: 0 auto; padding: 32px 24px; background: #ffffff; }
+        .brand { font-size: 11px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #6b7a70; margin-bottom: 24px; }
+        h1 { margin: 0 0 4px 0; font-size: 24px; color: #16241c; font-weight: 600; }
+        .subhead { margin: 0 0 24px 0; color: #6b7a70; font-size: 14px; }
+        .order-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        .order-table th { border-bottom: 2px solid #16241c; padding: 8px 0; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7a70; font-weight: 600; }
+        .order-table td { padding: 12px 0; border-bottom: 1px solid #e5e1d8; font-size: 14px; }
+        .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #16241c; margin: 24px 0 8px 0; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e1d8; font-size: 12px; color: #6b7a70; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p class="brand">CocoJojoChem</p>
+        <h1>Your order has been cancelled</h1>
+        <p class="subhead">Hi ${escapeHtml(name)}, order #${order.id} has been cancelled.</p>
+
+        <p class="section-title">Cancelled Items</p>
+        <table class="order-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th style="text-align: center;">Qty</th>
+                    <th style="text-align: right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+        </table>
+
+        <p style="font-size: 14px; margin: 16px 0 0 0;">
+          If a payment was already captured for this order, it will be refunded to your original payment
+          method — refunds can take a few business days to appear, depending on your bank.
+        </p>
+        <p style="font-size: 14px; margin: 12px 0 0 0;">
+          If you weren't expecting this or have any questions, just reply to this email and we'll help sort
+          it out.
+        </p>
+
+        <div class="footer">
+            <p>This is an automated notice for order #${order.id}, sent to ${escapeHtml(email)}</p>
             <p>CocoJojoChem</p>
         </div>
     </div>

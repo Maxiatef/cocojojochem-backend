@@ -92,6 +92,13 @@ export class ProductVariant {
   @Column('decimal', { precision: 10, scale: 2, nullable: true })
   weightLb: string | null;
 
+  // Marks this variant as priced by the drum shipping table (per-drum flat
+  // rate by zone, see shipping-drum-tiers.constants.ts) instead of the
+  // regular per-lb weight table. Cart quantity of a drum-flagged variant is
+  // treated as a drum count, not a weight.
+  @Column({ type: 'boolean', default: false })
+  isSoldByDrum: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

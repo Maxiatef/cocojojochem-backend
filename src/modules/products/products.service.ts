@@ -251,6 +251,47 @@ export class ProductsService {
       case 'newest':
         qb.orderBy('product.createdAt', 'DESC');
         break;
+      case 'sku_asc':
+        qb.orderBy('product.sku', 'ASC');
+        break;
+      case 'sku_desc':
+        qb.orderBy('product.sku', 'DESC');
+        break;
+      case 'category_asc':
+        qb.orderBy('category.name', 'ASC');
+        break;
+      case 'category_desc':
+        qb.orderBy('category.name', 'DESC');
+        break;
+      case 'variants_asc':
+      case 'variants_desc':
+        // Correlated subquery, not a GROUP BY over the already-joined
+        // `variants` rows — the join is one row per variant (needed for the
+        // stock/price filters above), so a plain COUNT(variants.id) here
+        // would double-count against those same joined rows.
+        qb.addSelect((subQb) => {
+          return subQb
+            .select('COUNT(*)', 'cnt')
+            .from('product_variants', 'v')
+            .where('v."productId" = product.id');
+        }, 'variant_count').orderBy('variant_count', sort === 'variants_desc' ? 'DESC' : 'ASC');
+        break;
+      case 'stock_asc':
+      case 'stock_desc':
+        // Severity order (worst first for desc): OUT_OF_STOCK, then
+        // ON_BACKORDER, then IN_STOCK — not alphabetical, which would be
+        // meaningless to an admin scanning for problems.
+        qb.addSelect(
+          `CASE variants."stockStatus" WHEN 'OUT_OF_STOCK' THEN 0 WHEN 'ON_BACKORDER' THEN 1 ELSE 2 END`,
+          'stock_severity',
+        ).orderBy('stock_severity', sort === 'stock_desc' ? 'ASC' : 'DESC');
+        break;
+      case 'status_asc':
+        qb.orderBy('product.isPublished', 'ASC');
+        break;
+      case 'status_desc':
+        qb.orderBy('product.isPublished', 'DESC');
+        break;
       default:
         qb.orderBy('product.name', 'ASC');
     }
@@ -470,6 +511,7 @@ export class ProductsService {
           ...v,
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
+          weightLb: v.weightLb != null ? String(v.weightLb) : null,
           stockStatus: resolveStockStatus(v),
           availableFrom: v.availableFrom ? new Date(v.availableFrom) : null,
         }),
@@ -538,6 +580,7 @@ export class ProductsService {
           productId: id,
           price: String(v.price),
           salePrice: v.salePrice != null ? String(v.salePrice) : null,
+          weightLb: v.weightLb != null ? String(v.weightLb) : null,
           stockStatus: resolveStockStatus(v),
           availableFrom: v.availableFrom ? new Date(v.availableFrom) : null,
         }),

@@ -101,6 +101,24 @@ export class CategoriesService {
     return { category, data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
+  // Full detail for the admin "View Category" page: category + parent + children + all its
+  // products (including unpublished ones — this is admin-only, unlike findProducts/findBySlug).
+  async findByIdWithProducts(id: number) {
+    const category = await this.categoriesRepo.findOne({
+      where: { id },
+      relations: ['parent', 'children'],
+    });
+    if (!category) throw new NotFoundException(`Category #${id} not found`);
+
+    const products = await this.productsRepo.find({
+      where: { categoryId: id },
+      relations: ['variants'],
+      order: { name: 'ASC' },
+    });
+
+    return { ...category, products };
+  }
+
   async create(dto: CreateCategoryDto) {
     const category = this.categoriesRepo.create(dto);
     const saved = await this.categoriesRepo.save(category);

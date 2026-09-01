@@ -33,7 +33,8 @@ import {
   SiteSetting,
   SeoMetric,
   SeoIssue,
-    PageView,
+  PageView,
+  ShippingRateTier,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -76,6 +77,7 @@ export const AppDataSource = new DataSource({
     SeoMetric,
     SeoIssue,
     PageView,
+    ShippingRateTier,
   ],
   migrations: ['src/migrations/*.ts'],
 });

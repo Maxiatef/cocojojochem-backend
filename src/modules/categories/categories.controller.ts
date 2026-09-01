@@ -35,6 +35,12 @@ export class CategoriesController {
     return this.categoriesService.findTree();
   }
 
+  // Full detail view for the admin "View Category" page: category + parent/children + all products in it.
+  @Get('id/:id')
+  findByIdDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.categoriesService.findByIdWithProducts(id);
+  }
+
   @Get(':slug')
   findOne(@Param('slug') slug: string) {
     return this.categoriesService.findBySlug(slug);

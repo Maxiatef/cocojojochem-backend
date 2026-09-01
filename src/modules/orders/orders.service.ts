@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import axios from 'axios';
-import { Cart, Order, OrderItem, OrderStatus, ProductVariant, StockStatus } from '../../entities';
+import { Cart, Order, OrderItem, OrderStatus, ProductVariant, ShippingRateTierKind, StockStatus } from '../../entities';
 import { getEffectivePrice } from '../../common/pricing.util';
 import { UsersService } from '../users/users.service';
 import { CouponsService } from '../coupons/coupons.service';
@@ -14,23 +14,10 @@ import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
 import { CarrierCode, UpdateTrackingDto } from './dto/update-tracking.dto';
 import { SiteSettingsService } from '../site-settings/site-settings.service';
 import { ShipStationService } from '../shipstation/shipstation.service';
-import {
-  getStateName,
-  getZoneForState,
-  normalizeStateCode,
-} from './shipping-zones.constants';
-import {
-  FREE_SHIPPING_THRESHOLD,
-  US_REMOTE_BASE_RATE,
-  US_REMOTE_STATES,
-  US_ZONE_BASE_RATES,
-  calculateAdditionalItemSurcharge,
-  calculateInternationalParcelRates,
-  formatRateGroupLabel,
-  getInternationalShippingRateGroup,
-  isUnitedStates,
-  roundMoney,
-} from './shipping-rates.constants';
+import { ShippingRateTiersService } from '../shipping-rate-tiers/shipping-rate-tiers.service';
+import { EmailService } from '../email/email.service';
+import { getZoneForState, normalizeStateCode } from './shipping-zones.constants';
+import { FREE_SHIPPING_THRESHOLD, isUnitedStates, roundMoney } from './shipping-rates.constants';
 
 const DEFAULT_WHOLESALE_MINIMUM = 250;
 
@@ -220,6 +207,8 @@ export class OrdersService {
     private readonly stripeService: StripeService,
     private readonly siteSettingsService: SiteSettingsService,
     private readonly shipStationService: ShipStationService,
+    private readonly shippingRateTiersService: ShippingRateTiersService,
+    private readonly emailService: EmailService,
   ) {}
 
   private async getWholesaleMinimum(): Promise<number> {
@@ -234,17 +223,29 @@ export class OrdersService {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : FREE_SHIPPING_THRESHOLD;
   }
 
+  private async getDefaultShippingAmount(): Promise<number> {
+    const raw = await this.siteSettingsService.getValue('DEFAULT_SHIPPING_AMOUNT');
+    const parsed = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  private async getInternationalShippingAmount(): Promise<number> {
+    const raw = await this.siteSettingsService.getValue('INTERNATIONAL_SHIPPING_AMOUNT');
+    const parsed = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
   // Public (no auth) — used pre-checkout, before an account/order exists, to
   // show shipping cost + the wholesale-minimum banner as the customer fills
-  // in their address. Deterministic rate-table logic ported from the real
-  // cocojojo.com site's ShippingService (shipping.service.ts) — no live
-  // carrier API call, so it never depends on a configured SHIPPO_API_KEY and
-  // always matches the real site's numbers exactly. US destinations use the
-  // real zone-based flat-rate table (free past $85 subtotal); international
-  // destinations use the real UPS-estimate weight-band table per region
-  // group, and report `canShip: false` for any country outside those groups
-  // (matching the real site's "manual quote required" behavior) instead of
-  // guessing a number.
+  // in their address. Domestic cost is computed from the admin-editable
+  // Zone 1-7 rate tables (ShippingRateTiersService — WEIGHT and, for
+  // drum-flagged variants, DRUM), with a flat admin-set default as the
+  // last-resort fallback for any state without a zone mapping. There is no
+  // separate per-state override anymore — editing a zone's rate changes
+  // the cost for every state in that zone at once. International stays a
+  // single flat admin-set amount. Every US state and every country can
+  // always ship — no more "we don't ship here" / "manual quote required"
+  // rejections.
   async getShippingEstimate(dto: ShippingEstimateDto): Promise<ShippingEstimateResult> {
     const variantIds = dto.items.map((i) => i.productVariantId);
     const variants = await this.variantsRepo.find({ where: { id: In(variantIds) } });
@@ -252,19 +253,26 @@ export class OrdersService {
 
     let subtotal = 0;
     let totalWeight = 0;
-    let totalQuantity = 0;
+    let drumCount = 0;
     for (const item of dto.items) {
       const variant = variantsById.get(item.productVariantId);
       if (!variant) {
         throw new BadRequestException(`Product variant #${item.productVariantId} not found`);
       }
       subtotal += Number(getEffectivePrice(variant)) * item.quantity;
+      if (variant.isSoldByDrum) {
+        // Drum-flagged variants are priced via the drum table (per-drum
+        // flat rate), not the per-lb weight table — cart quantity IS the
+        // drum count, and doesn't add to totalWeight.
+        drumCount += item.quantity;
+        continue;
+      }
       // Not every variant has weightLb configured yet; 1 lb is a documented
-      // fallback (matches the real site's own fallback-weight behavior),
-      // not a claim about the item's real weight.
+      // fallback (matches the real site's own fallback-weight behavior), not
+      // a claim about the item's real weight. Total cart weight now feeds
+      // the domestic zone+weight rate table below.
       const weight = variant.weightLb != null ? Number(variant.weightLb) : 1;
       totalWeight += weight * item.quantity;
-      totalQuantity += item.quantity;
     }
     subtotal = roundMoney(subtotal);
     totalWeight = Number(totalWeight.toFixed(4));
@@ -292,51 +300,58 @@ export class OrdersService {
     const isFreeShipping = subtotal >= freeShippingThreshold;
     const amountAwayFromFreeShipping = roundMoney(Math.max(freeShippingThreshold - subtotal, 0));
 
+    if (isFreeShipping) {
+      return {
+        available: true,
+        canShip: true,
+        isDomestic,
+        shippingCost: 0,
+        zoneName: isDomestic ? 'Free Shipping' : 'Free Shipping (International)',
+        shippingMethod: 'Free Shipping',
+        weightLb: totalWeight,
+        subtotal,
+        wholesaleMinimum,
+        meetsMinimum: true,
+        minimumRemaining: 0,
+        isFreeShipping: true,
+        freeShippingThreshold,
+        amountAwayFromFreeShipping: 0,
+      };
+    }
+
     if (isDomestic) {
-      const additionalItemSurcharge = calculateAdditionalItemSurcharge(totalQuantity);
       const normalizedState = normalizeStateCode(dto.state || '');
+      const zone = normalizedState ? getZoneForState(normalizedState) ?? undefined : undefined;
 
-      if (US_REMOTE_STATES.has(normalizedState)) {
-        const shippingCost = isFreeShipping ? 0 : roundMoney(US_REMOTE_BASE_RATE + additionalItemSurcharge);
-        return {
-          available: true,
-          canShip: true,
-          isDomestic: true,
-          shippingCost,
-          zone: 9,
-          zoneName: 'Remote US',
-          shippingMethod: isFreeShipping ? 'Free Shipping' : 'Approximate Retail Shipping - Remote US',
-          weightLb: totalWeight,
-          subtotal,
-          wholesaleMinimum,
-          meetsMinimum: true,
-          minimumRemaining: 0,
-          isFreeShipping,
-          freeShippingThreshold,
-          amountAwayFromFreeShipping,
-        };
+      let shippingCost: number;
+      let zoneName: string;
+      let shippingMethod: string;
+
+      // Weight-rated (non-drum) items only get a weight-table charge if
+      // there's actual non-drum weight — an all-drum cart shouldn't also
+      // be charged the 1lb-minimum weight-table row.
+      const weightRate =
+        zone != null && totalWeight > 0
+          ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.WEIGHT, zone, totalWeight)
+          : null;
+      const drumRate =
+        zone != null && drumCount > 0
+          ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.DRUM, zone, drumCount)
+          : null;
+
+      if (weightRate != null || drumRate != null) {
+        shippingCost = roundMoney((weightRate ?? 0) + (drumRate ?? 0));
+        zoneName = `Zone ${zone}`;
+        const parts: string[] = [];
+        if (weightRate != null) parts.push(`${totalWeight} lb`);
+        if (drumRate != null) parts.push(`${drumCount} drum${drumCount === 1 ? '' : 's'}`);
+        shippingMethod = `Standard Shipping - Zone ${zone} (${parts.join(' + ')})`;
+      } else {
+        const defaultAmount = await this.getDefaultShippingAmount();
+        shippingCost = roundMoney(defaultAmount);
+        zoneName = 'Default US Shipping';
+        shippingMethod = 'Standard Shipping';
       }
-
-      const zone = getZoneForState(normalizedState);
-      if (!zone) {
-        return {
-          available: true,
-          canShip: false,
-          isDomestic: true,
-          subtotal,
-          wholesaleMinimum,
-          meetsMinimum: true,
-          minimumRemaining: 0,
-          weightLb: totalWeight,
-          zoneName: normalizedState ? `Non-shipping area (${getStateName(normalizedState)})` : 'Unknown US state',
-          errorMessage: normalizedState
-            ? `We do not ship to ${getStateName(normalizedState)}.`
-            : 'A valid US shipping state is required to calculate shipping.',
-        };
-      }
-
-      const baseShippingCost = US_ZONE_BASE_RATES[zone];
-      const shippingCost = isFreeShipping ? 0 : roundMoney(baseShippingCost + additionalItemSurcharge);
 
       return {
         available: true,
@@ -344,54 +359,38 @@ export class OrdersService {
         isDomestic: true,
         shippingCost,
         zone,
-        zoneName: `Zone ${zone}`,
-        shippingMethod: isFreeShipping ? 'Free Shipping' : 'Approximate Retail Shipping - US',
+        zoneName,
+        shippingMethod,
         weightLb: totalWeight,
         subtotal,
         wholesaleMinimum,
         meetsMinimum: true,
         minimumRemaining: 0,
-        isFreeShipping,
+        isFreeShipping: false,
         freeShippingThreshold,
         amountAwayFromFreeShipping,
       };
     }
 
-    // International
-    const rateGroup = getInternationalShippingRateGroup(dto.country);
-    if (!rateGroup) {
-      return {
-        available: true,
-        canShip: false,
-        isDomestic: false,
-        subtotal,
-        wholesaleMinimum,
-        meetsMinimum: true,
-        minimumRemaining: 0,
-        weightLb: totalWeight,
-        zoneName: 'International - Manual Quote',
-        shippingMethod: 'International Shipping - Manual Quote Required',
-        errorMessage: `Shipping to ${dto.country} requires a manual quote. Please contact us before payment.`,
-      };
-    }
-
-    const parcelRates = calculateInternationalParcelRates(totalWeight, rateGroup);
-    const regionLabel = `International - ${formatRateGroupLabel(rateGroup)}`;
+    // International — one flat admin-set amount for every non-US destination.
+    const internationalAmount = await this.getInternationalShippingAmount();
+    const shippingCost = roundMoney(internationalAmount);
 
     return {
       available: true,
       canShip: true,
       isDomestic: false,
-      shippingCost: parcelRates.shippingCost,
-      regionLabel: `Estimated UPS International Shipping (${regionLabel})`,
-      zoneName: regionLabel,
-      shippingMethod: 'Estimated UPS International Shipping',
+      shippingCost,
+      zoneName: 'International',
+      shippingMethod: 'International Shipping',
       weightLb: totalWeight,
       subtotal,
       wholesaleMinimum,
       meetsMinimum: true,
       minimumRemaining: 0,
       isFreeShipping: false,
+      freeShippingThreshold,
+      amountAwayFromFreeShipping,
     };
   }
 
@@ -742,13 +741,46 @@ export class OrdersService {
     return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
+  // Backs the guest-vs-customer stat cards atop the admin Orders page.
+  // "Customer" here means the order is linked to a real account (userId set)
+  // — guest checkout never creates an order with a userId, even when the
+  // guest also opted to create an account afterward (that only sets
+  // userId retroactively on that SAME order, so it still ends up counted
+  // as customer once linked).
+  async getAdminStats() {
+    const [total, customerOrders, guestOrders] = await Promise.all([
+      this.ordersRepo.count(),
+      this.ordersRepo.count({ where: { userId: Not(IsNull()) } }),
+      this.ordersRepo.count({ where: { userId: IsNull() } }),
+    ]);
+    return { total, customerOrders, guestOrders };
+  }
+
   async updateStatus(id: number, status: OrderStatus) {
-    const order = await this.ordersRepo.findOne({ where: { id } });
+    const order = await this.ordersRepo.findOne({ where: { id }, relations: ['items', 'user'] });
     if (!order) throw new NotFoundException(`Order #${id} not found`);
     const previousStatus = order.status;
     order.status = status;
     const saved = await this.ordersRepo.save(order);
     this.logger.log(`Order #${id} status changed: ${previousStatus} -> ${status}`);
+
+    if (status === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED) {
+      try {
+        await this.emailService.sendOrderCancelledEmail(saved);
+      } catch (err) {
+        this.logger.warn(
+          `Order cancellation email threw unexpectedly for order #${id}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+
+    // Strip passwordHash before this reaches a client — the `user` relation
+    // was only added here to build the cancellation email, and loads the
+    // full User row, hash included.
+    if (saved.user) {
+      const { passwordHash, ...safeUser } = saved.user;
+      saved.user = safeUser as typeof saved.user;
+    }
     return saved;
   }
 
