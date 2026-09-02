@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { ShippingRateTier, ShippingRateTierKind } from '../../entities';
 
 export const MIN_ZONE = 1;
-export const MAX_ZONE = 7;
+export const MAX_ZONE = 8;
 
 @Injectable()
 export class ShippingRateTiersService {
@@ -16,7 +16,7 @@ export class ShippingRateTiersService {
   ) {}
 
   // All rows for one table (WEIGHT or DRUM), reshaped into one row per
-  // breakpoint with a 7-wide `rates` array (index 0 = Zone 1) — the shape
+  // breakpoint with an 8-wide `rates` array (index 0 = Zone 1) — the shape
   // the admin rate-table UI renders directly.
   async findGrouped(kind: ShippingRateTierKind) {
     const rows = await this.repo.find({ where: { kind }, order: { breakpoint: 'ASC', zone: 'ASC' } });

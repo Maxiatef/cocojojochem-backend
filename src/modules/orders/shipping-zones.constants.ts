@@ -1,15 +1,19 @@
-// US state code/name helpers, plus the admin-provided Zone 1-7 map used to
-// price domestic shipping by weight (see shipping-weight-tiers.constants.ts).
+// US state code/name helpers, plus the admin-provided Zone 1-8 map used to
+// price domestic shipping by weight (see shipping-rate-tiers module).
 // Zone assignments for the 48 contiguous states come directly from the
-// admin. AK/HI/DC/territories/APO-FPO codes aren't in that list, so each is
-// assigned to the zone of its real-world postal gateway/nearest neighbor:
+// admin. AK/DC/territories/APO-FPO codes aren't in that list, so each is
+// assigned to the zone of its real-world postal gateway/nearest neighbor,
+// EXCEPT Hawaii + the Pacific island territories/APO, which the admin
+// explicitly placed in their own Zone 8 (priced at a multiple of Zone 7 —
+// see the seed migration and ADMIN_ZONE_8_STATES below):
 //   - DC -> Zone 7 (surrounded by MD/VA, both Zone 7)
 //   - AK -> Zone 4 (nearest mainland gateway state, WA)
-//   - HI, GU, MP, AS -> Zone 1 (Pacific, nearest mainland gateway state, CA)
+//   - HI, GU, MP, AS, AP -> Zone 8 (Hawaii + Pacific territories/APO — admin-designated)
 //   - PR, VI -> Zone 7 (nearest mainland gateway state, FL)
 //   - AA (Armed Forces Americas) -> Zone 7 (USPS routes AA through Miami)
 //   - AE (Armed Forces Europe/Canada/Africa/Mideast) -> Zone 7 (USPS routes AE through NY)
-//   - AP (Armed Forces Pacific) -> Zone 1 (USPS routes AP through SF)
+
+export const ZONE_8_STATE_CODES = ['HI', 'AS', 'GU', 'MP', 'AP'] as const;
 
 export const US_STATE_NAMES: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -30,7 +34,7 @@ export const US_STATE_NAMES: Record<string, string> = {
 };
 
 export const ZONE_BY_STATE: Record<string, number> = {
-  CA: 1, HI: 1, GU: 1, MP: 1, AS: 1, AP: 1,
+  CA: 1,
   NV: 2, AZ: 2,
   UT: 3,
   OR: 4, WA: 4, ID: 4, MT: 4, WY: 4, CO: 4, NM: 4, AK: 4,
@@ -39,6 +43,7 @@ export const ZONE_BY_STATE: Record<string, number> = {
   AL: 7, TN: 7, MI: 7, IN: 7, KY: 7, OH: 7, GA: 7, FL: 7, SC: 7, NC: 7, VA: 7,
   WV: 7, PA: 7, MD: 7, DE: 7, NJ: 7, NY: 7, CT: 7, RI: 7, MA: 7, VT: 7, NH: 7, ME: 7,
   DC: 7, PR: 7, VI: 7, AA: 7, AE: 7,
+  HI: 8, AS: 8, GU: 8, MP: 8, AP: 8,
 };
 
 const US_STATE_CODES_BY_NAME: Record<string, string> = Object.entries(US_STATE_NAMES).reduce(

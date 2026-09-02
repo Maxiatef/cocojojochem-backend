@@ -63,7 +63,7 @@ export class OrdersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SALES)
   getShippingReference() {
-    const zones = Array.from({ length: 7 }, (_, i) => i + 1).map((zone) => ({
+    const zones = Array.from({ length: 8 }, (_, i) => i + 1).map((zone) => ({
       zone,
       states: Object.entries(ZONE_BY_STATE)
         .filter(([, z]) => z === zone)

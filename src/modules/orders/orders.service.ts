@@ -39,7 +39,14 @@ export interface ShippingEstimateResult {
   freeShippingThreshold?: number;
   amountAwayFromFreeShipping?: number;
   errorMessage?: string;
+  // Advisory only — never blocks checkout. Shown for a drum-flagged item
+  // shipping to Zone 8 (HI/AS/GU/MP/AP): no drum shipping cost is computed
+  // or charged for that portion of the order — the customer is told to
+  // contact us for a manual quote instead.
+  carrierNotice?: string;
 }
+
+const ZONE_8_DRUM_CARRIER_NOTICE = 'For shipping cost, please contact us.';
 
 interface ShippoLocation {
   city?: string;
@@ -327,6 +334,11 @@ export class OrdersService {
       let zoneName: string;
       let shippingMethod: string;
 
+      // Zone 8 (HI/AS/GU/MP/AP) drums are never priced automatically — no
+      // cost is computed or charged for the drum portion of the order, the
+      // customer is told to contact us for a manual quote instead.
+      const isZone8Drums = zone === 8 && drumCount > 0;
+
       // Weight-rated (non-drum) items only get a weight-table charge if
       // there's actual non-drum weight — an all-drum cart shouldn't also
       // be charged the 1lb-minimum weight-table row.
@@ -335,16 +347,17 @@ export class OrdersService {
           ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.WEIGHT, zone, totalWeight)
           : null;
       const drumRate =
-        zone != null && drumCount > 0
+        zone != null && drumCount > 0 && !isZone8Drums
           ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.DRUM, zone, drumCount)
           : null;
 
-      if (weightRate != null || drumRate != null) {
+      if (weightRate != null || drumRate != null || isZone8Drums) {
         shippingCost = roundMoney((weightRate ?? 0) + (drumRate ?? 0));
         zoneName = `Zone ${zone}`;
         const parts: string[] = [];
         if (weightRate != null) parts.push(`${totalWeight} lb`);
         if (drumRate != null) parts.push(`${drumCount} drum${drumCount === 1 ? '' : 's'}`);
+        if (isZone8Drums) parts.push(`${drumCount} drum${drumCount === 1 ? '' : 's'} — contact us`);
         shippingMethod = `Standard Shipping - Zone ${zone} (${parts.join(' + ')})`;
       } else {
         const defaultAmount = await this.getDefaultShippingAmount();
@@ -369,6 +382,7 @@ export class OrdersService {
         isFreeShipping: false,
         freeShippingThreshold,
         amountAwayFromFreeShipping,
+        ...(isZone8Drums ? { carrierNotice: ZONE_8_DRUM_CARRIER_NOTICE } : {}),
       };
     }
 
