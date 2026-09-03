@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Category,
@@ -35,6 +36,8 @@ import {
   SeoIssue,
   PageView,
   ShippingRateTier,
+  QuoteListItem,
+  PendingCheckout,
 } from './entities';
 
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -45,6 +48,7 @@ import { UsersModule } from './modules/users/users.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CartModule } from './modules/cart/cart.module';
+import { QuoteListModule } from './modules/quote-list/quote-list.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.module';
 import { TestimonialsModule } from './modules/testimonials/testimonials.module';
@@ -57,6 +61,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
 import { BulkSalesModule } from './modules/bulk-sales/bulk-sales.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
+import { HealthModule } from './modules/health/health.module';
 import { ShippingRateTiersModule } from './modules/shipping-rate-tiers/shipping-rate-tiers.module';
 // SeoPagesModule is disabled — no admin UI edits SeoPage rows anymore (the
 // Meta Tags editor tab on /admin/seo was removed). Left commented, not
@@ -73,6 +78,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     // Global baseline: 100 requests/min per IP. Sensitive routes (login, register,
     // guest checkout, coupon validation, contact/newsletter forms) override this
     // with a tighter limit via @Throttle() directly on their controller methods.
@@ -122,6 +128,8 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
         SeoIssue,
         PageView,
         ShippingRateTier,
+        QuoteListItem,
+  PendingCheckout,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: true,
@@ -136,6 +144,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     CompaniesModule,
     AuthModule,
     CartModule,
+    QuoteListModule,
     OrdersModule,
     QuoteRequestsModule,
     TestimonialsModule,
@@ -148,6 +157,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     BulkSalesModule,
     AnalyticsModule,
     TrackingModule,
+    HealthModule,
     ShippingRateTiersModule,
     // SeoPagesModule, // disabled — see comment above the import
     SiteSettingsModule,

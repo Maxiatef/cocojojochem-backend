@@ -7,6 +7,7 @@ import { CompaniesModule } from '../companies/companies.module';
 import { EmailModule } from '../email/email.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { AuthCleanupService } from './auth-cleanup.service';
 import { JwtStrategy } from './jwt.strategy';
 import { RefreshToken, PasswordResetRequest } from '../../entities';
 
@@ -26,7 +27,7 @@ import { RefreshToken, PasswordResetRequest } from '../../entities';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, AuthCleanupService],
   exports: [AuthService],
 })
 export class AuthModule {}

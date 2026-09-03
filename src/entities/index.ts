@@ -29,3 +29,5 @@ export * from './SeoMetric';
 export * from './SeoIssue';
 export * from './PageView';
 export * from './ShippingRateTier';
+export * from './QuoteListItem';
+export * from './PendingCheckout';

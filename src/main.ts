@@ -1,3 +1,14 @@
+// Must be the very first import — loads .env into process.env before any
+// other file in the app is evaluated. Several modules read process.env.*
+// directly in static registration calls (e.g. AuthModule's
+// JwtModule.register({ secret: process.env.JWT_SECRET })), which run at
+// import time, BEFORE ConfigModule.forRoot() would otherwise load .env
+// (that only runs later, during AppModule's own decorator evaluation).
+// Without this, those static reads silently see `undefined` and fall back
+// to their hardcoded defaults — while anything reading process.env lazily
+// (e.g. inside a provider's constructor, like JwtStrategy) sees the real
+// value once ConfigModule has run, causing sign/verify secret mismatches.
+import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';

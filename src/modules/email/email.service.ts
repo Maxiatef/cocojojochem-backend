@@ -253,6 +253,7 @@ export class EmailService {
 
     const subtotal = Number(order.subtotal);
     const shippingCost = Number(order.shippingCost);
+    const taxAmount = Number(order.taxAmount);
     const couponAmount = Number(order.couponAmount);
     const total = Number(order.total);
 
@@ -313,6 +314,7 @@ export class EmailService {
             <tr><td>Subtotal</td><td style="text-align: right;">${formatCurrency(subtotal)}</td></tr>
             ${couponAmount > 0 ? `<tr><td>Discount</td><td style="text-align: right;">-${formatCurrency(couponAmount)}</td></tr>` : ''}
             <tr><td>Shipping</td><td style="text-align: right;">${shippingCost > 0 ? formatCurrency(shippingCost) : 'Free'}</td></tr>
+            ${taxAmount > 0 ? `<tr><td>Tax</td><td style="text-align: right;">${formatCurrency(taxAmount)}</td></tr>` : ''}
             <tr class="grand-total"><td>Order Total</td><td style="text-align: right;">${formatCurrency(total)}</td></tr>
         </table>
 
@@ -441,6 +443,7 @@ export class EmailService {
 
     const subtotal = Number(order.subtotal);
     const shippingCost = Number(order.shippingCost);
+    const taxAmount = Number(order.taxAmount);
     const couponAmount = Number(order.couponAmount);
     const total = Number(order.total);
 
@@ -501,6 +504,7 @@ export class EmailService {
             <tr><td>Subtotal</td><td style="text-align: right;">${formatCurrency(subtotal)}</td></tr>
             ${couponAmount > 0 ? `<tr><td>Discount</td><td style="text-align: right;">-${formatCurrency(couponAmount)}</td></tr>` : ''}
             <tr><td>Shipping</td><td style="text-align: right;">${shippingCost > 0 ? formatCurrency(shippingCost) : 'Free'}</td></tr>
+            ${taxAmount > 0 ? `<tr><td>Tax</td><td style="text-align: right;">${formatCurrency(taxAmount)}</td></tr>` : ''}
             <tr class="grand-total"><td>Order Total</td><td style="text-align: right;">${formatCurrency(total)}</td></tr>
         </table>
 

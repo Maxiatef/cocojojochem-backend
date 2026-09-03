@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
-import { Cart, Order, OrderItem, ProductVariant } from '../../entities';
+import { Cart, Order, OrderItem, PendingCheckout, ProductVariant } from '../../entities';
 import { UsersModule } from '../users/users.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { StripeModule } from '../stripe/stripe.module';
@@ -14,7 +14,7 @@ import { OrdersController } from './orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Cart, ProductVariant]),
+    TypeOrmModule.forFeature([Order, OrderItem, Cart, ProductVariant, PendingCheckout]),
     UsersModule,
     CouponsModule,
     StripeModule,

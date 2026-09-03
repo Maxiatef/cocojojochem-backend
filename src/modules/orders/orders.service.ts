@@ -1,10 +1,21 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { In, IsNull, Not, Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import axios from 'axios';
-import { Cart, Order, OrderItem, OrderStatus, ProductVariant, ShippingRateTierKind, StockStatus } from '../../entities';
+import {
+  Cart,
+  Order,
+  OrderItem,
+  OrderStatus,
+  PendingCheckout,
+  ProductVariant,
+  PurchaseType,
+  ShippingRateTierKind,
+  StockStatus,
+} from '../../entities';
 import { getEffectivePrice } from '../../common/pricing.util';
 import { UsersService } from '../users/users.service';
 import { CouponsService } from '../coupons/coupons.service';
@@ -20,6 +31,20 @@ import { getZoneForState, normalizeStateCode } from './shipping-zones.constants'
 import { FREE_SHIPPING_THRESHOLD, isUnitedStates, roundMoney } from './shipping-rates.constants';
 
 const DEFAULT_WHOLESALE_MINIMUM = 250;
+
+// Snapshot of one cart line at checkout() time, serialized into
+// PendingCheckout.itemsJson and turned back into a real OrderItem only once
+// Stripe confirms payment (see finalizeCheckoutFromPendingId).
+interface PendingCheckoutItemSnapshot {
+  productVariantId: number;
+  productName: string;
+  variantLabel: string;
+  sku: string;
+  imageUrl: string | null;
+  quantity: number;
+  price: string;
+  purchaseType?: PurchaseType;
+}
 
 export interface ShippingEstimateResult {
   available: boolean;
@@ -39,14 +64,16 @@ export interface ShippingEstimateResult {
   freeShippingThreshold?: number;
   amountAwayFromFreeShipping?: number;
   errorMessage?: string;
-  // Advisory only — never blocks checkout. Shown for a drum-flagged item
-  // shipping to Zone 8 (HI/AS/GU/MP/AP): no drum shipping cost is computed
-  // or charged for that portion of the order — the customer is told to
-  // contact us for a manual quote instead.
+  taxAmount?: number;
+  taxName?: string;
+  // Advisory only — never blocks checkout. Shown for any order shipping to
+  // Zone 8 (HI/AS/GU/MP/AP) — we don't ship there through the normal rate
+  // tables (weight or drum), so no shipping cost is computed or charged;
+  // the customer is told to contact us for a manual quote instead.
   carrierNotice?: string;
 }
 
-const ZONE_8_DRUM_CARRIER_NOTICE = 'For shipping cost, please contact us.';
+const ZONE_8_CARRIER_NOTICE = 'We do not ship to this destination through our standard rates. For shipping cost, please contact us.';
 
 interface ShippoLocation {
   city?: string;
@@ -208,6 +235,8 @@ export class OrdersService {
     private readonly cartRepo: Repository<Cart>,
     @InjectRepository(ProductVariant)
     private readonly variantsRepo: Repository<ProductVariant>,
+    @InjectRepository(PendingCheckout)
+    private readonly pendingCheckoutsRepo: Repository<PendingCheckout>,
     private readonly usersService: UsersService,
     private readonly couponsService: CouponsService,
     private readonly jwtService: JwtService,
@@ -240,6 +269,23 @@ export class OrdersService {
     const raw = await this.siteSettingsService.getValue('INTERNATIONAL_SHIPPING_AMOUNT');
     const parsed = raw != null ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  // Admin Settings -> Tax tab saves this as a percentage (e.g. "8.5" for
+  // 8.5%). Defaults to 0 (no tax charged) if unset/invalid — never
+  // fabricates a rate.
+  private async getTaxRate(): Promise<number> {
+    const raw = await this.siteSettingsService.getValue('tax.value');
+    const parsed = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  // Computed server-side from the real subtotal — never trusts a
+  // client-sent tax amount, unlike shippingCost (see CheckoutDto comment),
+  // since the subtotal itself is always server-computed anyway.
+  private async computeTax(subtotal: number): Promise<number> {
+    const rate = await this.getTaxRate();
+    return roundMoney((subtotal * rate) / 100);
   }
 
   // Public (no auth) — used pre-checkout, before an account/order exists, to
@@ -307,6 +353,10 @@ export class OrdersService {
     const isFreeShipping = subtotal >= freeShippingThreshold;
     const amountAwayFromFreeShipping = roundMoney(Math.max(freeShippingThreshold - subtotal, 0));
 
+    const taxAmount = await this.computeTax(subtotal);
+    const taxNameRaw = await this.siteSettingsService.getValue('tax.name');
+    const taxName = taxNameRaw || 'Tax';
+
     if (isFreeShipping) {
       return {
         available: true,
@@ -323,6 +373,8 @@ export class OrdersService {
         isFreeShipping: true,
         freeShippingThreshold,
         amountAwayFromFreeShipping: 0,
+        taxAmount,
+        taxName,
       };
     }
 
@@ -334,30 +386,35 @@ export class OrdersService {
       let zoneName: string;
       let shippingMethod: string;
 
-      // Zone 8 (HI/AS/GU/MP/AP) drums are never priced automatically — no
-      // cost is computed or charged for the drum portion of the order, the
-      // customer is told to contact us for a manual quote instead.
-      const isZone8Drums = zone === 8 && drumCount > 0;
+      // Zone 8 (HI/AS/GU/MP/AP) is never priced automatically — no shipping
+      // cost is computed or charged at all for the whole zone (weight or
+      // drum), the customer is told to contact us for a manual quote
+      // instead. We don't ship to these destinations through the normal
+      // rate tables.
+      const isZone8 = zone === 8;
 
       // Weight-rated (non-drum) items only get a weight-table charge if
       // there's actual non-drum weight — an all-drum cart shouldn't also
       // be charged the 1lb-minimum weight-table row.
       const weightRate =
-        zone != null && totalWeight > 0
+        zone != null && totalWeight > 0 && !isZone8
           ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.WEIGHT, zone, totalWeight)
           : null;
       const drumRate =
-        zone != null && drumCount > 0 && !isZone8Drums
+        zone != null && drumCount > 0 && !isZone8
           ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.DRUM, zone, drumCount)
           : null;
 
-      if (weightRate != null || drumRate != null || isZone8Drums) {
+      if (isZone8) {
+        shippingCost = 0;
+        zoneName = `Zone ${zone}`;
+        shippingMethod = `Standard Shipping - Zone ${zone} — contact us`;
+      } else if (weightRate != null || drumRate != null) {
         shippingCost = roundMoney((weightRate ?? 0) + (drumRate ?? 0));
         zoneName = `Zone ${zone}`;
         const parts: string[] = [];
         if (weightRate != null) parts.push(`${totalWeight} lb`);
         if (drumRate != null) parts.push(`${drumCount} drum${drumCount === 1 ? '' : 's'}`);
-        if (isZone8Drums) parts.push(`${drumCount} drum${drumCount === 1 ? '' : 's'} — contact us`);
         shippingMethod = `Standard Shipping - Zone ${zone} (${parts.join(' + ')})`;
       } else {
         const defaultAmount = await this.getDefaultShippingAmount();
@@ -382,7 +439,9 @@ export class OrdersService {
         isFreeShipping: false,
         freeShippingThreshold,
         amountAwayFromFreeShipping,
-        ...(isZone8Drums ? { carrierNotice: ZONE_8_DRUM_CARRIER_NOTICE } : {}),
+        taxAmount,
+        taxName,
+        ...(isZone8 ? { carrierNotice: ZONE_8_CARRIER_NOTICE } : {}),
       };
     }
 
@@ -405,6 +464,8 @@ export class OrdersService {
       isFreeShipping: false,
       freeShippingThreshold,
       amountAwayFromFreeShipping,
+      taxAmount,
+      taxName,
     };
   }
 
@@ -516,13 +577,18 @@ export class OrdersService {
     return order;
   }
 
+  // No Order row is created here — only once Stripe confirms payment (see
+  // finalizeCheckoutFromPendingId, called from WebhooksService). This method
+  // validates everything, snapshots the cart into a PendingCheckout row, and
+  // hands the customer off to Stripe. If they never pay, or payment fails,
+  // nothing was ever "ordered": no phantom PENDING order, no stock
+  // decremented, no cart cleared, no coupon usage counted.
   async checkout(userId: number | null, dto: CheckoutDto) {
     const { shippingAddress, notes } = dto;
 
-    let order: Order;
-
     if (userId) {
-      // Logged-in checkout: unchanged behavior — pulls from the server-side DB cart.
+      // Logged-in checkout: pulls from the server-side DB cart (left
+      // untouched here — only cleared once payment is confirmed).
       const cart = await this.cartRepo.findOne({
         where: { userId },
         relations: ['items', 'items.variant', 'items.variant.product'],
@@ -539,23 +605,18 @@ export class OrdersService {
       this.assertAvailability(cartLines);
       this.assertOrderLimits(cartLines);
 
-      const orderItems = cart.items.map((item) =>
-        this.orderItemsRepo.create({
-          productVariantId: item.productVariantId,
-          productName: item.variant.product?.name || '',
-          variantLabel: item.variant.label,
-          sku: item.variant.sku,
-          imageUrl: item.variant.imageUrl || item.variant.product?.imageUrl || null,
-          quantity: item.quantity,
-          price: item.price,
-          purchaseType: item.purchaseType,
-        }),
-      );
+      const itemSnapshots: PendingCheckoutItemSnapshot[] = cart.items.map((item) => ({
+        productVariantId: item.productVariantId,
+        productName: item.variant.product?.name || '',
+        variantLabel: item.variant.label,
+        sku: item.variant.sku,
+        imageUrl: item.variant.imageUrl || item.variant.product?.imageUrl || null,
+        quantity: item.quantity,
+        price: item.price,
+        purchaseType: item.purchaseType,
+      }));
 
-      const subtotal = orderItems.reduce(
-        (sum, item) => sum + Number(item.price) * item.quantity,
-        0,
-      );
+      const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
 
       const user = await this.usersService.findById(userId);
       const cartItemsForCoupon = cart.items.map((item) => ({
@@ -567,35 +628,33 @@ export class OrdersService {
       }));
       const couponResult = await this.applyCoupon(dto.couponCode, user.email, subtotal, cartItemsForCoupon);
       const shippingCost = dto.shippingCost ?? 0;
-      const total = subtotal - (couponResult?.couponAmount || 0) + shippingCost;
+      const taxAmount = await this.computeTax(subtotal);
 
-      order = this.ordersRepo.create({
-        userId,
-        status: OrderStatus.PENDING,
-        items: orderItems,
-        subtotal: subtotal.toFixed(2),
-        total: total.toFixed(2),
-        couponId: couponResult?.couponId ?? null,
-        couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
-        shippingCost: shippingCost.toFixed(2),
-        shippingAddress,
-        notes,
-      });
-
-      order = await this.ordersRepo.save(order);
-      await this.decrementStock(cartLines);
-      await this.cartRepo.manager.remove(cart.items);
-      if (couponResult) {
-        await this.couponsService.incrementUsage(couponResult.couponId, user.email, order.id);
-      }
-      this.logger.log(
-        `Order placed: #${order.id} by user ${userId} — ${orderItems.length} item(s), total $${order.total}`,
+      const pending = await this.pendingCheckoutsRepo.save(
+        this.pendingCheckoutsRepo.create({
+          userId,
+          itemsJson: JSON.stringify(itemSnapshots),
+          subtotal: subtotal.toFixed(2),
+          shippingCost: shippingCost.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          couponId: couponResult?.couponId ?? null,
+          couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
+          shippingAddress,
+          notes,
+        }),
       );
 
-      const session = await this.stripeService.createCheckoutSession(order);
-      order.stripePaymentIntentId = session.payment_intent as string;
-      await this.ordersRepo.save(order);
-      return { order, checkoutUrl: session.url };
+      const session = await this.stripeService.createCheckoutSession({
+        pendingCheckoutId: pending.id,
+        items: itemSnapshots,
+        shippingCost,
+        taxAmount,
+        couponAmount: couponResult?.couponAmount || 0,
+      });
+      this.logger.log(
+        `Checkout session created for user ${userId} (pendingCheckout #${pending.id}) — awaiting payment.`,
+      );
+      return { checkoutUrl: session.url };
     }
 
     // Guest checkout: no DB cart exists — items come straight from the request body.
@@ -632,12 +691,9 @@ export class OrdersService {
     this.assertAvailability(guestLines);
     this.assertOrderLimits(guestLines);
 
-    const orderItems = dto.items.map((reqItem) => {
-      const variant = variantsById.get(reqItem.productVariantId);
-      if (!variant) {
-        throw new BadRequestException(`Product variant #${reqItem.productVariantId} not found`);
-      }
-      return this.orderItemsRepo.create({
+    const itemSnapshots: PendingCheckoutItemSnapshot[] = dto.items.map((reqItem) => {
+      const variant = variantsById.get(reqItem.productVariantId)!;
+      return {
         productVariantId: variant.id,
         productName: variant.product?.name || '',
         variantLabel: variant.label,
@@ -645,13 +701,10 @@ export class OrdersService {
         imageUrl: variant.imageUrl || variant.product?.imageUrl || null,
         quantity: reqItem.quantity,
         price: getEffectivePrice(variant),
-      });
+      };
     });
 
-    const subtotal = orderItems.reduce(
-      (sum, item) => sum + Number(item.price) * item.quantity,
-      0,
-    );
+    const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
 
     const cartItemsForCoupon = dto.items.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId);
@@ -665,45 +718,25 @@ export class OrdersService {
     });
     const couponResult = await this.applyCoupon(dto.couponCode, dto.guestEmail, subtotal, cartItemsForCoupon);
     const shippingCost = dto.shippingCost ?? 0;
-    const total = subtotal - (couponResult?.couponAmount || 0) + shippingCost;
+    const taxAmount = await this.computeTax(subtotal);
 
-    order = this.ordersRepo.create({
-      userId: null,
-      guestEmail: dto.guestEmail,
-      guestName: dto.guestName,
-      guestPhone: dto.guestPhone ?? null,
-      status: OrderStatus.PENDING,
-      items: orderItems,
-      subtotal: subtotal.toFixed(2),
-      total: total.toFixed(2),
-      couponId: couponResult?.couponId ?? null,
-      couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
-      shippingCost: shippingCost.toFixed(2),
-      shippingAddress,
-      notes,
-    });
-
-    order = await this.ordersRepo.save(order);
-    await this.decrementStock(guestLines);
-    if (couponResult) {
-      await this.couponsService.incrementUsage(couponResult.couponId, dto.guestEmail, order.id);
-    }
-    this.logger.log(
-      `Guest order placed: #${order.id} by ${dto.guestEmail} — ${orderItems.length} item(s), total $${order.total}`,
-    );
-
+    // Account creation isn't gated on payment — it's not "an order", just an
+    // account, and creating it now lets the customer be logged in through
+    // the Stripe redirect. Ties the pending checkout (and eventually the
+    // real order) to the new account.
     let accessToken: string | undefined;
+    let linkedUserId: number | null = null;
 
     if (dto.createAccount) {
       if (!dto.password) {
         this.logger.warn(
-          `Skipped account creation for guest order #${order.id} — createAccount was true but no password was provided.`,
+          `Skipped account creation for guest checkout by ${dto.guestEmail} — createAccount was true but no password was provided.`,
         );
       } else {
         const existing = await this.usersService.findByEmail(dto.guestEmail);
         if (existing) {
           this.logger.log(
-            `Skipped account creation for guest order #${order.id} — email ${dto.guestEmail} is already registered.`,
+            `Skipped account creation for guest checkout — email ${dto.guestEmail} is already registered.`,
           );
         } else {
           const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -713,29 +746,147 @@ export class OrdersService {
             fullName: dto.guestName,
             phone: dto.guestPhone,
           });
-
-          await this.ordersRepo.update(order.id, { userId: newUser.id });
-          order.userId = newUser.id;
-
+          linkedUserId = newUser.id;
           accessToken = this.jwtService.sign({
             sub: newUser.id,
             email: newUser.email,
             role: newUser.role,
           });
-
-          this.logger.log(
-            `Account created from guest checkout: ${newUser.email} (id=${newUser.id}) — linked to order #${order.id}`,
-          );
+          this.logger.log(`Account created from guest checkout: ${newUser.email} (id=${newUser.id}).`);
         }
       }
     }
 
-    const session = await this.stripeService.createCheckoutSession(order);
-    order.stripePaymentIntentId = session.payment_intent as string;
-    await this.ordersRepo.save(order);
+    const pending = await this.pendingCheckoutsRepo.save(
+      this.pendingCheckoutsRepo.create({
+        userId: linkedUserId,
+        guestEmail: dto.guestEmail,
+        guestName: dto.guestName,
+        guestPhone: dto.guestPhone ?? null,
+        itemsJson: JSON.stringify(itemSnapshots),
+        subtotal: subtotal.toFixed(2),
+        shippingCost: shippingCost.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        couponId: couponResult?.couponId ?? null,
+        couponAmount: (couponResult?.couponAmount || 0).toFixed(2),
+        shippingAddress,
+        notes,
+      }),
+    );
 
-    const finalOrder = accessToken ? { ...order, accessToken } : order;
-    return { order: finalOrder, checkoutUrl: session.url };
+    const session = await this.stripeService.createCheckoutSession({
+      pendingCheckoutId: pending.id,
+      items: itemSnapshots,
+      shippingCost,
+      taxAmount,
+      couponAmount: couponResult?.couponAmount || 0,
+    });
+    this.logger.log(
+      `Guest checkout session created for ${dto.guestEmail} (pendingCheckout #${pending.id}) — awaiting payment.`,
+    );
+
+    return { checkoutUrl: session.url, accessToken };
+  }
+
+  // Called from WebhooksService once Stripe confirms a Checkout Session was
+  // paid — this is the ONLY place an Order gets created for a Stripe
+  // checkout. Turns the snapshot back into real OrderItems, decrements
+  // stock, clears the DB cart (logged-in) and counts coupon usage — none of
+  // which happened at checkout() time. Idempotent: returns null if the
+  // pending checkout is gone (already finalized or expired/cleaned up) so a
+  // duplicate webhook delivery is a safe no-op; the caller should also check
+  // for an existing Order by stripeCheckoutSessionId first.
+  async finalizeCheckoutFromPendingId(
+    pendingCheckoutId: number,
+    stripeCheckoutSessionId: string,
+    stripePaymentIntentId?: string | null,
+  ): Promise<Order | null> {
+    const pending = await this.pendingCheckoutsRepo.findOne({ where: { id: pendingCheckoutId } });
+    if (!pending) return null;
+
+    const itemSnapshots: PendingCheckoutItemSnapshot[] = JSON.parse(pending.itemsJson);
+    const orderItems = itemSnapshots.map((item) =>
+      this.orderItemsRepo.create({
+        productVariantId: item.productVariantId,
+        productName: item.productName,
+        variantLabel: item.variantLabel,
+        sku: item.sku,
+        imageUrl: item.imageUrl,
+        quantity: item.quantity,
+        price: item.price,
+        purchaseType: item.purchaseType,
+      }),
+    );
+
+    const subtotal = Number(pending.subtotal);
+    const shippingCost = Number(pending.shippingCost);
+    const taxAmount = Number(pending.taxAmount);
+    const couponAmount = Number(pending.couponAmount);
+    const total = subtotal - couponAmount + shippingCost + taxAmount;
+
+    let order = this.ordersRepo.create({
+      userId: pending.userId,
+      guestEmail: pending.userId ? null : pending.guestEmail,
+      guestName: pending.userId ? null : pending.guestName,
+      guestPhone: pending.userId ? null : pending.guestPhone,
+      status: OrderStatus.PENDING,
+      items: orderItems,
+      subtotal: subtotal.toFixed(2),
+      total: total.toFixed(2),
+      couponId: pending.couponId,
+      couponAmount: couponAmount.toFixed(2),
+      shippingCost: shippingCost.toFixed(2),
+      taxAmount: taxAmount.toFixed(2),
+      shippingAddress: pending.shippingAddress,
+      notes: pending.notes,
+      stripeCheckoutSessionId,
+      stripePaymentIntentId: stripePaymentIntentId ?? null,
+    });
+    order = await this.ordersRepo.save(order);
+
+    const variantIds = itemSnapshots.map((i) => i.productVariantId);
+    const variants = await this.variantsRepo.find({ where: { id: In(variantIds) } });
+    const variantsById = new Map(variants.map((v) => [v.id, v]));
+    await this.decrementStock(
+      itemSnapshots
+        .filter((item) => variantsById.has(item.productVariantId))
+        .map((item) => ({ variant: variantsById.get(item.productVariantId)!, quantity: item.quantity })),
+    );
+
+    if (pending.userId) {
+      const cart = await this.cartRepo.findOne({ where: { userId: pending.userId }, relations: ['items'] });
+      if (cart && cart.items.length) {
+        await this.cartRepo.manager.remove(cart.items);
+      }
+    }
+
+    if (pending.couponId) {
+      const email = pending.userId
+        ? (await this.usersService.findById(pending.userId)).email
+        : pending.guestEmail || '';
+      await this.couponsService.incrementUsage(pending.couponId, email, order.id);
+    }
+
+    await this.pendingCheckoutsRepo.remove(pending);
+
+    this.logger.log(
+      `Order #${order.id} created from pendingCheckout #${pendingCheckoutId} after Stripe payment confirmation — total $${order.total}.`,
+    );
+    return order;
+  }
+
+  // Backstop for abandoned Stripe Checkout Sessions (customer never returns,
+  // or the session simply expires — Stripe's default is 24h) — deletes
+  // pending checkouts older than a day so this table doesn't grow forever.
+  // Nothing sensitive is lost: no order, no stock movement, no coupon usage
+  // was ever created for these.
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupAbandonedPendingCheckouts(): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await this.pendingCheckoutsRepo.delete({ createdAt: LessThan(cutoff) });
+    if (result.affected) {
+      this.logger.log(`Cleaned up ${result.affected} abandoned pending checkout(s) older than 24h.`);
+    }
   }
 
   // Admin/sales view: every order, joined to the placing user and their company,

@@ -63,18 +63,39 @@ export class WebhooksService {
 
     if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = parseInt(session.metadata?.orderId || '', 10);
-      if (!orderId) {
-        this.logger.warn('Stripe checkout session missing metadata.orderId — ignoring.');
-        return { received: true };
-      }
-      const order = await this.ordersRepo.findOne({ where: { id: orderId }, relations: ['items', 'user'] });
-      if (!order) {
-        this.logger.warn(`No order found for id ${orderId} (Stripe checkout session) — ignoring.`);
-        return { received: true };
-      }
       if (session.payment_status === 'unpaid') {
         return { received: true };
+      }
+
+      // Idempotency: a duplicate webhook delivery for the same session must
+      // never create a second order. Check for an already-finalized order
+      // first — only fall back to creating one from the pending checkout if
+      // this is genuinely the first time we've seen this session.
+      let order = await this.ordersRepo.findOne({
+        where: { stripeCheckoutSessionId: session.id },
+        relations: ['items', 'user'],
+      });
+
+      if (!order) {
+        const pendingCheckoutId = parseInt(session.metadata?.pendingCheckoutId || '', 10);
+        if (!pendingCheckoutId) {
+          this.logger.warn('Stripe checkout session missing metadata.pendingCheckoutId — ignoring.');
+          return { received: true };
+        }
+        const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+        const created = await this.ordersService.finalizeCheckoutFromPendingId(
+          pendingCheckoutId,
+          session.id,
+          paymentIntentId,
+        );
+        if (!created) {
+          this.logger.warn(
+            `No pending checkout found for id ${pendingCheckoutId} (Stripe checkout session ${session.id}) — already finalized or expired, ignoring.`,
+          );
+          return { received: true };
+        }
+        order = await this.ordersRepo.findOne({ where: { id: created.id }, relations: ['items', 'user'] });
+        if (!order) return { received: true };
       }
 
       const wasAlreadyProcessed = order.status !== OrderStatus.PENDING;
@@ -127,18 +148,12 @@ export class WebhooksService {
     }
 
     if (event.type === 'checkout.session.async_payment_failed') {
+      // No order was ever created for this session (that only happens on
+      // success — see checkout.session.completed above), so there's nothing
+      // to roll back. Just log it and let the pending checkout expire via
+      // OrdersService.cleanupAbandonedPendingCheckouts.
       const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = parseInt(session.metadata?.orderId || '', 10);
-      if (!orderId) {
-        this.logger.warn('Stripe checkout session (failed) missing metadata.orderId — ignoring.');
-        return { received: true };
-      }
-      const order = await this.ordersRepo.findOne({ where: { id: orderId } });
-      if (!order) {
-        this.logger.warn(`No order found for id ${orderId} (Stripe checkout session failed) — ignoring.`);
-        return { received: true };
-      }
-      this.logger.warn(`Async payment failed for order #${order.id} (Stripe checkout session ${session.id}).`);
+      this.logger.warn(`Async payment failed for Stripe checkout session ${session.id} — no order was created.`);
       return { received: true };
     }
 

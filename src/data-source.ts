@@ -35,6 +35,8 @@ import {
   SeoIssue,
   PageView,
   ShippingRateTier,
+  QuoteListItem,
+  PendingCheckout,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -78,6 +80,8 @@ export const AppDataSource = new DataSource({
     SeoIssue,
     PageView,
     ShippingRateTier,
+    QuoteListItem,
+  PendingCheckout,
   ],
   migrations: ['src/migrations/*.ts'],
 });

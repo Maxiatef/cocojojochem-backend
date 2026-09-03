@@ -65,6 +65,14 @@ export class Order {
   @Column({ type: 'varchar', nullable: true })
   stripePaymentIntentId: string | null;
 
+  // The Stripe Checkout Session that created this order — set at order-
+  // creation time (which now only happens once Stripe confirms payment, see
+  // WebhooksService.handleStripeEvent). Used as the idempotency key so a
+  // duplicate webhook delivery for the same session never creates a second
+  // order.
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  stripeCheckoutSessionId: string | null;
+
   @Column({ type: 'varchar', nullable: true })
   shipstationOrderId: string | null;
 
@@ -89,6 +97,11 @@ export class Order {
   // qualifying international orders.
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   shippingCost: string;
+
+  // Actual tax charged, computed server-side at checkout from the admin-set
+  // `tax.value` percentage (Admin Settings -> Tax) applied to the subtotal.
+  @Column('decimal', { precision: 10, scale: 2, default: 0 })
+  taxAmount: string;
 
   @CreateDateColumn()
   createdAt: Date;
