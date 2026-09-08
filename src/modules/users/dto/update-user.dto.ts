@@ -2,10 +2,20 @@ import { IsEmail, IsEnum, IsInt, IsOptional, IsString, MinLength } from 'class-v
 import { UserRole } from '../../../entities';
 
 export class UpdateUserDto {
+  // Still accepted so existing callers keep working. When firstName/lastName
+  // are sent instead, the service recomposes fullName from them.
   @IsOptional()
   @IsString()
   @MinLength(1)
   fullName?: string;
+
+  @IsOptional()
+  @IsString()
+  firstName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string | null;
 
   @IsOptional()
   @IsEmail()

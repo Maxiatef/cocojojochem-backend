@@ -386,12 +386,23 @@ export class OrdersService {
       let zoneName: string;
       let shippingMethod: string;
 
-      // Zone 8 (HI/AS/GU/MP/AP) is never priced automatically — no shipping
-      // cost is computed or charged at all for the whole zone (weight or
-      // drum), the customer is told to contact us for a manual quote
-      // instead. We don't ship to these destinations through the normal
-      // rate tables.
+      // Zone 8 (AK/HI/DC/PR/VI/GU/MP/AS) is never priced automatically — no
+      // shipping cost is computed or charged at all for the whole zone
+      // (weight or drum), the customer is told to contact us for a manual
+      // quote instead. We don't ship to these destinations through the
+      // normal rate tables.
       const isZone8 = zone === 8;
+
+      // A state WAS supplied but maps to no zone — a military/diplomatic
+      // mail code (AA/AE/AP, APO/FPO/DPO), or simply a bad value. These must
+      // never fall through to the flat fallback amount below: quoting a real
+      // price for an address we can't ship to is worse than quoting nothing,
+      // so they get the same manual-quote treatment as Zone 8.
+      //
+      // Distinguished from "no state chosen yet" (normalizedState === ''),
+      // which happens on every keystroke while the customer is still filling
+      // the address in and must keep its existing behaviour.
+      const isUnknownDestination = !!normalizedState && zone == null;
 
       // Weight-rated (non-drum) items only get a weight-table charge if
       // there's actual non-drum weight — an all-drum cart shouldn't also
@@ -405,7 +416,11 @@ export class OrdersService {
           ? await this.shippingRateTiersService.getRate(ShippingRateTierKind.DRUM, zone, drumCount)
           : null;
 
-      if (isZone8) {
+      if (isUnknownDestination) {
+        shippingCost = 0;
+        zoneName = 'Manual quote required';
+        shippingMethod = 'Shipping quoted manually — contact us';
+      } else if (isZone8) {
         shippingCost = 0;
         zoneName = `Zone ${zone}`;
         shippingMethod = `Standard Shipping - Zone ${zone} — contact us`;
@@ -441,7 +456,7 @@ export class OrdersService {
         amountAwayFromFreeShipping,
         taxAmount,
         taxName,
-        ...(isZone8 ? { carrierNotice: ZONE_8_CARRIER_NOTICE } : {}),
+        ...(isZone8 || isUnknownDestination ? { carrierNotice: ZONE_8_CARRIER_NOTICE } : {}),
       };
     }
 

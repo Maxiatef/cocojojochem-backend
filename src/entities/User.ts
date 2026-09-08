@@ -30,8 +30,19 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   passwordHash: string | null;
 
+  // `fullName` stays the canonical display name — it's read across orders,
+  // emails, shipping labels, and the storefront. firstName/lastName were
+  // added for the admin user editor (which edits the name in two parts, as
+  // WooCommerce does) and `fullName` is recomposed from them on save, so
+  // every existing consumer keeps working unchanged.
   @Column()
   fullName: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  firstName: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  lastName: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   phone: string | null;

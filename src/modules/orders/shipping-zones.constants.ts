@@ -1,11 +1,13 @@
 // US state code/name helpers, plus the admin-provided Zone 1-8 map used to
 // price domestic shipping by weight (see shipping-rate-tiers module).
 // Zone 1-7 is an exact, explicit admin-provided list of the 41 states named
-// below. EVERY other US state/code — including Alaska, Hawaii, DC, and all
-// territories/APO-FPO — falls into Zone 8 (priced at a multiple of Zone 7,
-// and never auto-priced at checkout — see ZONE_8_CARRIER_NOTICE in
-// orders.service.ts). Zone 8 is a catch-all, not a curated list, so it's
-// derived below rather than hand-enumerated.
+// below. EVERY other US state/code — including Alaska, Hawaii, DC, and the
+// territories — falls into Zone 8, which is never auto-priced at checkout
+// (see ZONE_8_CARRIER_NOTICE in orders.service.ts). Zone 8 is a catch-all,
+// not a curated list, so it's derived below rather than hand-enumerated.
+//
+// The military/diplomatic mail codes are NOT in this map at all — see
+// UNSUPPORTED_MILITARY_CODES below for why.
 
 const ZONE_1_7_STATES: Record<string, number> = {
   CA: 1,
@@ -31,10 +33,24 @@ export const US_STATE_NAMES: Record<string, string> = {
   VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
   DC: 'District of Columbia', PR: 'Puerto Rico', GU: 'Guam', VI: 'U.S. Virgin Islands',
   AS: 'American Samoa', MP: 'Northern Mariana Islands',
-  AA: 'Armed Forces Americas (AA)', AE: 'Armed Forces Europe (AE)', AP: 'Armed Forces Pacific (AP)',
-  APO: 'Army/Air Force Post Office (APO)', FPO: 'Fleet Post Office (Navy) (FPO)',
-  DPO: 'Diplomatic Post Office (DPO)',
 };
+
+// Deliberately NOT shippable destinations, and deliberately absent from
+// US_STATE_NAMES above: the military/diplomatic mail codes AA (Armed Forces
+// Americas), AE (Europe), AP (Pacific) and the post-office designations
+// APO/FPO/DPO.
+//
+// Only USPS can deliver to them (UPS/FedEx cannot at all), parcels are capped
+// around 70 lb, and military mail restricts or prohibits much of what we sell
+// — so nothing in the weight or drum tables could actually be fulfilled to
+// one of these addresses. They are omitted from the state list rather than
+// mapped to a zone, so they never appear in the checkout dropdown.
+//
+// Kept here as a named list purely so the unrecognised-destination path in
+// OrdersService.getShippingEstimate can be reasoned about: any code not in
+// US_STATE_NAMES resolves to no zone and is quoted manually rather than
+// silently falling back to a flat amount.
+export const UNSUPPORTED_MILITARY_CODES = ['AA', 'AE', 'AP', 'APO', 'FPO', 'DPO'] as const;
 
 export const ZONE_BY_STATE: Record<string, number> = Object.keys(US_STATE_NAMES).reduce(
   (acc, code) => ({ ...acc, [code]: ZONE_1_7_STATES[code] ?? 8 }),

@@ -649,6 +649,49 @@ export class EmailService {
     await this.sendEmailWithBrevo(apiKey, email, subject, html);
   }
 
+  // Sent when an admin clicks "Send Reset Link" on the admin user editor.
+  // Unlike sendPasswordResetCode above there's no 5-digit code here — the URL
+  // itself carries a pre-verified single-use token, so the recipient lands
+  // directly on the set-password form. That makes the link a bearer
+  // credential, hence the shorter copy about not forwarding it.
+  // Returns whether the mail was actually handed to Brevo. Unlike the other
+  // senders here this reports back rather than silently no-opping, because
+  // the admin UI shows the result: telling an admin "reset link sent" when
+  // the mailer is unconfigured would leave them waiting on an email that is
+  // never going to arrive.
+  async sendAdminPasswordResetLink(email: string, resetUrl: string, fullName?: string): Promise<boolean> {
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      this.logger.warn(`BREVO_API_KEY not configured — skipping admin password reset link email to ${email}.`);
+      return false;
+    }
+
+    const subject = 'Set your CocoJojoChem password';
+    const greeting = fullName ? `Hi ${escapeHtml(fullName.split(' ')[0])},` : 'Hi,';
+    const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Set Your Password</title></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#16241c;margin:0;padding:0;background:#ffffff;">
+  <div style="max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;">
+    <p style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#6b7a70;margin-bottom:24px;">CocoJojoChem</p>
+    <h1 style="margin:0 0 4px 0;font-size:22px;color:#16241c;font-weight:600;">Set your password</h1>
+    <p style="color:#6b7a70;font-size:14px;margin:0 0 8px 0;">${greeting}</p>
+    <p style="color:#6b7a70;font-size:14px;margin:0 0 24px 0;">A member of our team has started a password reset for your wholesale account. Click below to choose a new password. This link expires in 24 hours and can only be used once.</p>
+    <p style="margin:0 0 24px 0;">
+      <a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#16241c;color:#ffffff;text-decoration:none;padding:13px 26px;font-size:14px;font-weight:600;border-radius:4px;">Choose a new password</a>
+    </p>
+    <p style="color:#6b7a70;font-size:12px;margin:0 0 4px 0;">If the button doesn't work, paste this into your browser:</p>
+    <p style="font-size:12px;word-break:break-all;margin:0 0 20px 0;"><a href="${escapeHtml(resetUrl)}" style="color:#16241c;">${escapeHtml(resetUrl)}</a></p>
+    <p style="color:#6b7a70;font-size:12px;margin:0;">Don't forward this email — anyone with this link can set your password. If you weren't expecting this, you can safely ignore it and your password will stay unchanged.</p>
+  </div>
+</body>
+</html>`;
+
+    await this.sendEmailWithBrevo(apiKey, email, subject, html);
+    return true;
+  }
+
   private buildQuoteRequestEmail(qr: QuoteRequest): string {
     const itemRows = (qr.items || [])
       .map(

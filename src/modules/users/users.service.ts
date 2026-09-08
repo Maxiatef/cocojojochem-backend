@@ -1,14 +1,25 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { Order, QuoteRequest, User, UserRole } from '../../entities';
+import * as crypto from 'crypto';
+import { Order, PasswordResetRequest, QuoteRequest, RefreshToken, User, UserRole } from '../../entities';
+import { hashToken } from '../../common/hash-token';
+import { EmailService } from '../email/email.service';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
+// An admin-issued reset link is a convenience an admin hands to a real
+// customer who may not read their mail immediately, so it gets a far longer
+// life than the 10-minute self-service code. Still finite — a link that never
+// expires is a permanent account takeover sitting in an inbox.
+const ADMIN_RESET_LINK_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger('Users');
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
@@ -16,6 +27,11 @@ export class UsersService {
     private readonly ordersRepo: Repository<Order>,
     @InjectRepository(QuoteRequest)
     private readonly quoteRequestsRepo: Repository<QuoteRequest>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepo: Repository<RefreshToken>,
+    @InjectRepository(PasswordResetRequest)
+    private readonly passwordResetRepo: Repository<PasswordResetRequest>,
+    private readonly emailService: EmailService,
   ) {}
 
   findByEmail(email: string) {
@@ -151,24 +167,118 @@ export class UsersService {
     }
 
     if (dto.fullName !== undefined) user.fullName = dto.fullName;
+    if (dto.firstName !== undefined) user.firstName = dto.firstName || null;
+    if (dto.lastName !== undefined) user.lastName = dto.lastName || null;
     if (dto.phone !== undefined) user.phone = dto.phone;
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.companyId !== undefined) user.companyId = dto.companyId;
 
-    return this.usersRepo.save(user);
+    // Recompose the canonical display name from the parts the admin edited.
+    // Only when a part was actually sent — a caller that PATCHes just
+    // `fullName` (the pre-existing behaviour, and what the storefront does)
+    // must keep setting it verbatim. Guarded against blanking a required
+    // column: if both parts come back empty, the old fullName stands.
+    if (dto.firstName !== undefined || dto.lastName !== undefined) {
+      const composed = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+      if (composed) user.fullName = composed;
+    }
+
+    // Strip the hash before returning — this response goes straight to the
+    // admin's browser on every save from the user editor, and there's no
+    // reason for a bcrypt hash to travel over the wire. (GET /users/:id
+    // already did this; the write paths didn't.)
+    const { passwordHash, ...safeUser } = await this.usersRepo.save(user);
+    return safeUser;
   }
 
   async setPassword(id: number, newPassword: string) {
     const user = await this.findById(id);
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     await this.usersRepo.save(user);
-    return { success: true };
+
+    // Changing the password has to invalidate live sessions, or an admin
+    // resetting a compromised account wouldn't actually lock the attacker
+    // out — their existing refresh token would keep minting fresh access
+    // tokens against the new password indefinitely.
+    const revokedSessions = await this.revokeAllSessions(id);
+    this.logger.log(`Admin set password for user #${id} (${user.email}); revoked ${revokedSessions} session(s)`);
+
+    return { success: true, revokedSessions };
+  }
+
+  // Revokes every live refresh token for a user, signing them out of every
+  // device. Access tokens already issued stay valid until they expire (15m
+  // by default) — they're stateless JWTs with nothing to revoke.
+  async revokeAllSessions(userId: number): Promise<number> {
+    const result = await this.refreshTokenRepo.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+    return result.affected ?? 0;
+  }
+
+  // Admin "Send Reset Link": mints a password-reset request that is ALREADY
+  // code-verified, so the emailed link drops the customer straight onto the
+  // set-password page with no 5-digit code step. Deliberately reuses the
+  // existing PasswordResetRequest table and the existing
+  // POST /auth/reset-password endpoint rather than introducing a second,
+  // parallel reset mechanism to keep secure.
+  async sendPasswordResetLink(id: number) {
+    const user = await this.findById(id);
+
+    const rawLinkToken = crypto.randomBytes(32).toString('hex');
+
+    await this.passwordResetRepo.save(
+      this.passwordResetRepo.create({
+        userId: user.id,
+        // No code is ever emailed for this row, so codeHash is set to the
+        // hash of a throwaway random value — the column is non-null and
+        // nothing a caller could submit can ever match it.
+        codeHash: hashToken(crypto.randomBytes(32).toString('hex')),
+        // Belt-and-braces: also exhausts the code-attempt budget, so the
+        // verify-code path rejects this row outright.
+        attempts: 5,
+        verifiedTokenHash: hashToken(rawLinkToken),
+        expiresAt: new Date(Date.now() + ADMIN_RESET_LINK_TTL_MS),
+        usedAt: null,
+        adminInitiated: true,
+      }),
+    );
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const resetUrl = `${frontendUrl}/account/set-password?token=${rawLinkToken}`;
+
+    // Email failure must not fail the request — the row is already minted
+    // and the admin needs to be told the difference between "sent" and
+    // "couldn't send", not get a 500 with no idea what state things are in.
+    let emailSent = false;
+    try {
+      // Reports false (rather than throwing) when the mailer isn't
+      // configured — the link row exists either way, so the admin needs to
+      // know whether an email is actually on its way.
+      emailSent = await this.emailService.sendAdminPasswordResetLink(user.email, resetUrl, user.fullName);
+      if (emailSent) {
+        this.logger.log(`Admin-issued password reset link sent to ${user.email} (user #${user.id})`);
+      } else {
+        this.logger.warn(
+          `Admin-issued password reset link created for user #${user.id} but not emailed — mailer not configured.`,
+        );
+      }
+    } catch (err) {
+      emailSent = false;
+      this.logger.warn(
+        `Failed to send admin password reset link to ${user.email}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    return { success: true, email: user.email, emailSent };
   }
 
   async updateRole(id: number, role: UserRole) {
     const user = await this.findById(id);
     user.role = role;
-    return this.usersRepo.save(user);
+    const { passwordHash, ...safeUser } = await this.usersRepo.save(user);
+    return safeUser;
   }
 
   async createStaff(dto: CreateStaffUserDto) {
@@ -183,6 +293,9 @@ export class UsersService {
       phone: dto.phone,
       role: dto.role,
     });
-    return user;
+    // Renamed on destructure — `passwordHash` is already bound above in this
+    // scope as the value we just hashed.
+    const { passwordHash: _hash, ...safeUser } = user;
+    return safeUser;
   }
 }

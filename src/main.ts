@@ -11,10 +11,11 @@
 import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { networkInterfaces } from 'os';
 import * as express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
@@ -81,11 +82,81 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
   const startPort = Number(process.env.PORT) || 4000;
+  const bootStartedAt = Date.now();
   const port = await listenOnFirstFreePort(app, startPort);
-  console.log(`cocojojochem backend running on http://localhost:${port}/api`);
-  console.log(`Swagger docs at http://localhost:${port}/api/docs`);
+  logStartupBanner(port, startPort, Date.now() - bootStartedAt);
 }
 bootstrap();
+
+// Returns every non-internal IPv4 address on this machine, so the log shows
+// the LAN addresses the API is actually reachable on — not just localhost,
+// which is useless when testing from a phone or another machine on the
+// network. `app.listen(port)` binds 0.0.0.0 by default, so all of these
+// genuinely serve traffic.
+function getLanAddresses(): string[] {
+  const nets = networkInterfaces();
+  const addresses: string[] = [];
+  for (const iface of Object.values(nets)) {
+    for (const net of iface || []) {
+      // Node <18 reports `family` as the string 'IPv4'; newer versions use 4.
+      const isIpv4 = net.family === 'IPv4' || (net.family as unknown as number) === 4;
+      if (isIpv4 && !net.internal) addresses.push(net.address);
+    }
+  }
+  return addresses;
+}
+
+function logStartupBanner(port: number, requestedPort: number, bootMs: number) {
+  const logger = new Logger('Bootstrap');
+  const env = process.env.NODE_ENV || 'development';
+
+  logger.log(`CocoJojoChem backend started in ${bootMs}ms — ${env} — pid ${process.pid} — node ${process.version}`);
+  logger.log(`Listening on 0.0.0.0:${port}`);
+  logger.log(`  local    http://localhost:${port}/api`);
+  for (const ip of getLanAddresses()) {
+    logger.log(`  network  http://${ip}:${port}/api`);
+  }
+  logger.log(`  health   http://localhost:${port}/api/health`);
+  logger.log(`  docs     http://localhost:${port}/api/docs`);
+
+  // Surfaced loudly because listenOnFirstFreePort() silently falls forward:
+  // a stale process holding 4000 means the app boots on 4001 and every
+  // frontend request (hardcoded to 4000) 404s with nothing obviously wrong.
+  if (port !== requestedPort) {
+    logger.warn(
+      `Port ${requestedPort} was busy — bound ${port} instead. NEXT_PUBLIC_API_URL points at ${requestedPort}, so the frontend will NOT reach this process until you free that port or update it.`,
+    );
+  }
+
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const dbPort = process.env.DB_PORT || '5432';
+  const dbName = process.env.DB_NAME || 'cocojojochem';
+  logger.log(`Database  postgres://${dbHost}:${dbPort}/${dbName}`);
+  logger.log(`Frontend  ${process.env.FRONTEND_URL || 'http://localhost:3000'} (CORS: *)`);
+
+  // Configured/missing only — never the values. Keys are the single most
+  // common cause of "it works locally but not on the server", and several of
+  // these fail silently at runtime rather than at boot.
+  const integrations: [string, string | undefined][] = [
+    ['Stripe', process.env.STRIPE_SECRET_KEY],
+    ['Stripe webhook', process.env.STRIPE_WEBHOOK_SECRET],
+    ['Brevo email', process.env.BREVO_API_KEY],
+    ['Shippo', process.env.SHIPPO_API_KEY],
+    ['ShipStation', process.env.SHIPSTATION_API_KEY],
+  ];
+  const configured = integrations.filter(([, v]) => !!v).map(([k]) => k);
+  const missing = integrations.filter(([, v]) => !v).map(([k]) => k);
+  logger.log(`Integrations configured: ${configured.length ? configured.join(', ') : 'none'}`);
+  if (missing.length) {
+    logger.warn(`Integrations NOT configured (these features silently no-op): ${missing.join(', ')}`);
+  }
+
+  // A boot with the fallback secret still signs and accepts real tokens, so
+  // it never surfaces as an error — only as an app anyone can forge a login for.
+  if (!process.env.JWT_SECRET) {
+    logger.error('JWT_SECRET is not set — falling back to the hardcoded default. Do NOT run like this outside local dev.');
+  }
+}
 
 // Tries `startPort`, then startPort+1, startPort+2, ... until one binds
 // successfully — so a stray leftover process on 4000 doesn't block startup.
@@ -97,7 +168,7 @@ async function listenOnFirstFreePort(app: import('@nestjs/common').INestApplicat
       return port;
     } catch (err: any) {
       if (err?.code === 'EADDRINUSE') {
-        console.warn(`Port ${port} is already in use — trying ${port + 1}...`);
+        new Logger('Bootstrap').warn(`Port ${port} is already in use — trying ${port + 1}...`);
         continue;
       }
       throw err;

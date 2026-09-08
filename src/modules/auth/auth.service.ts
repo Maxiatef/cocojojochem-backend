@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
@@ -21,6 +21,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AccountStatus, RefreshToken, PasswordResetRequest, UserRole } from '../../entities';
+import { hashToken } from '../../common/hash-token';
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RESET_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -193,7 +194,15 @@ export class AuthService {
     }
     // Verified tokens get a slightly longer window than the raw code so the
     // customer has time to fill out the new-password step.
-    if (Date.now() - request.createdAt.getTime() > RESET_CODE_TTL_MS + RESET_TOKEN_TTL_MS) {
+    //
+    // Admin-issued reset links are exempt: they're minted pre-verified with
+    // their own 24h `expiresAt` (already enforced just above), so applying
+    // the short code-flow window here would expire every admin link ~25
+    // minutes after it was sent.
+    if (
+      !request.adminInitiated &&
+      Date.now() - request.createdAt.getTime() > RESET_CODE_TTL_MS + RESET_TOKEN_TTL_MS
+    ) {
       throw new UnauthorizedException('Invalid or expired reset token');
     }
 
@@ -208,7 +217,17 @@ export class AuthService {
     request.usedAt = new Date();
     await this.passwordResetRepo.save(request);
 
-    this.logger.log(`Password reset via forgot-password flow for user #${user.id} (${user.email})`);
+    // A completed reset must invalidate live sessions — the whole point of
+    // resetting is usually that someone else has the old credentials, and a
+    // surviving refresh token would keep minting access tokens for them.
+    const { affected } = await this.refreshTokenRepo.update(
+      { userId: user.id, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+
+    this.logger.log(
+      `Password reset via ${request.adminInitiated ? 'admin-issued link' : 'forgot-password flow'} for user #${user.id} (${user.email}); revoked ${affected ?? 0} session(s)`,
+    );
     return { success: true };
   }
 
@@ -253,8 +272,11 @@ export class AuthService {
     return { success: true };
   }
 
+  // Delegates to the shared helper — UsersService mints admin reset-link
+  // tokens that resetPassword() above has to verify, so the two must hash
+  // identically or every admin-issued link would fail to validate.
   private hashToken(rawToken: string): string {
-    return crypto.createHash('sha256').update(rawToken).digest('hex');
+    return hashToken(rawToken);
   }
 
   private async buildToken(sub: number, email: string, role: string) {

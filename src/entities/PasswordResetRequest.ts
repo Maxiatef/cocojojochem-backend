@@ -30,6 +30,16 @@ export class PasswordResetRequest {
   @Column({ type: 'timestamp', nullable: true })
   usedAt: Date | null;
 
+  // True for rows minted by an admin's "Send Reset Link" action rather than
+  // by a customer's own forgot-password request. Those rows are created
+  // ALREADY code-verified (`verifiedTokenHash` pre-set, `codeHash` set to an
+  // unmatchable value) so the emailed link skips the 5-digit step entirely,
+  // and they carry a much longer lifetime — see the expiry handling in
+  // AuthService.resetPassword, which relies on this flag to know it must not
+  // apply the short code-flow timing window.
+  @Column({ type: 'boolean', default: false })
+  adminInitiated: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 }

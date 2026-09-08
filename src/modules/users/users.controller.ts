@@ -91,10 +91,33 @@ export class UsersController {
     return this.usersService.updateUser(id, dto);
   }
 
+  // Sets the password outright without knowing the old one, and signs the
+  // user out everywhere as a side effect (see UsersService.setPassword).
   @Patch(':id/password')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   setPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: AdminSetPasswordDto) {
     return this.usersService.setPassword(id, dto.newPassword);
+  }
+
+  // Emails the user a link that lands them straight on the set-password page
+  // — no 5-digit code step, unlike the customer-initiated forgot-password
+  // flow. The admin never sees the password this way.
+  @Post(':id/send-password-reset')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  sendPasswordReset(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.sendPasswordResetLink(id);
+  }
+
+  // "Log out everywhere" — revokes every live refresh token for the user
+  // without touching their password.
+  @Post(':id/revoke-sessions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async revokeSessions(@Param('id', ParseIntPipe) id: number) {
+    await this.usersService.findById(id); // 404s on an unknown id
+    const revokedSessions = await this.usersService.revokeAllSessions(id);
+    return { success: true, revokedSessions };
   }
 }
