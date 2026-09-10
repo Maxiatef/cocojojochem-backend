@@ -10,9 +10,11 @@ import { UpdateBulkSaleDto } from './dto/update-bulk-sale.dto';
 
 @ApiTags('Bulk Sales')
 @ApiBearerAuth('access-token')
+// Class default is staff-wide so sales can view the bulk-sale campaigns shown
+// on the admin Coupons page; each write route below re-tightens to ADMIN.
 @Controller('bulk-sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@Roles(UserRole.ADMIN, UserRole.SALES)
 export class BulkSalesController {
   constructor(private readonly bulkSalesService: BulkSalesService) {}
 
@@ -27,16 +29,19 @@ export class BulkSalesController {
   }
 
   @Post()
+  @Roles(UserRole.ADMIN)
   create(@Body() dto: CreateBulkSaleDto) {
     return this.bulkSalesService.create(dto);
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBulkSaleDto) {
     return this.bulkSalesService.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.bulkSalesService.remove(id);
   }

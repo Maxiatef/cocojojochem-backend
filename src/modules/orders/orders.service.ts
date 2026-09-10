@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { In, IsNull, LessThan, Not, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import axios from 'axios';
 import {
@@ -24,7 +24,15 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
 import { CarrierCode, UpdateTrackingDto } from './dto/update-tracking.dto';
 import { SiteSettingsService } from '../site-settings/site-settings.service';
-import { ShipStationService } from '../shipstation/shipstation.service';
+// ShipStation is disabled — Shippo is the sole shipping provider. The import
+// is kept commented so restoring it is a one-line change.
+// import { ShipStationService } from '../shipstation/shipstation.service';
+import { ShippoService } from '../shippo/shippo.service';
+import {
+  computeAdvancedOrderStatus,
+  mapShippoTrackingResponseToCheckpoints,
+} from '../shippo/shippo.mapping';
+import type { ShippoTrackingResponse, TrackingResult } from '../shippo/shippo.types';
 import { ShippingRateTiersService } from '../shipping-rate-tiers/shipping-rate-tiers.service';
 import { EmailService } from '../email/email.service';
 import { getZoneForState, normalizeStateCode } from './shipping-zones.constants';
@@ -75,136 +83,24 @@ export interface ShippingEstimateResult {
 
 const ZONE_8_CARRIER_NOTICE = 'We do not ship to this destination through our standard rates. For shipping cost, please contact us.';
 
-interface ShippoLocation {
-  city?: string;
-  state?: string;
-  zip?: string;
-  country?: string;
-}
-
-interface ShippoTrackingHistoryEntry {
-  status: string;
-  status_details?: string;
-  status_date?: string;
-  location?: ShippoLocation;
-}
-
-export interface ShippoTrackingResponse {
-  carrier: string;
-  tracking_number: string;
-  tracking_status?: ShippoTrackingHistoryEntry;
-  tracking_history?: ShippoTrackingHistoryEntry[];
-  eta?: string | null;
-}
-
-export interface TrackingCheckpoint {
-  status: string;
-  description: string;
-  location: string | null;
-  timestamp: string;
-}
-
-export type TrackingResult =
-  | { available: false; reason: 'not_shipped_yet' | 'tracking_not_configured' | 'lookup_failed' }
-  | {
-      available: true;
-      carrier: string;
-      trackingNumber: string;
-      currentStatus: string;
-      eta: string | null;
-      checkpoints: TrackingCheckpoint[];
-    };
-
-// Order in which statuses become "reached" — used so a stale/conflicting
-// Shippo read can never move an order's status backward.
-export const ORDER_STATUS_RANK: Record<string, number> = {
-  [OrderStatus.PENDING]: 0,
-  [OrderStatus.PROCESSING]: 1,
-  [OrderStatus.SHIPPED]: 2,
-  [OrderStatus.DELIVERED]: 3,
-  [OrderStatus.CANCELLED]: -1,
-};
-
-/**
- * Pure mapping from a Shippo tracking status string to the internal
- * OrderStatus it should advance an order to, mirroring the real
- * cocojojo.com site's ShippoService.handleTrackingUpdate switch
- * (shippo.service.ts:1303-1337), except that our schema has a distinct
- * DELIVERED status (the real site collapses everything post-shipment into
- * SHIPPED), so DELIVERED is mapped onto our own DELIVERED status instead.
- *
- * Returns null when the status shouldn't move the order forward at all
- * (PRE_TRANSIT, RETURNED, FAILURE, UNKNOWN, or anything unrecognized) —
- * matching the real site's no-op behavior for those cases.
- */
-export function mapShippoStatusToTargetOrderStatus(shippoStatus: string | undefined | null): OrderStatus | null {
-  switch (shippoStatus) {
-    case 'DELIVERED':
-      return OrderStatus.DELIVERED;
-    case 'TRANSIT':
-    case 'OUT_FOR_DELIVERY':
-    case 'PICKUP':
-      return OrderStatus.SHIPPED;
-    case 'PRE_TRANSIT':
-    case 'RETURNED':
-    case 'FAILURE':
-    case 'UNKNOWN':
-    default:
-      return null;
-  }
-}
-
-/**
- * Pure, side-effect-free computation of what an order's status should
- * become given its current status and a raw Shippo tracking status string.
- * Returns the new OrderStatus if it should advance, or null if no change
- * should be made (target status unmapped, order cancelled, or the target
- * would not be a forward move per ORDER_STATUS_RANK).
- */
-export function computeAdvancedOrderStatus(
-  currentStatus: OrderStatus,
-  shippoStatus: string | undefined | null,
-): OrderStatus | null {
-  const target = mapShippoStatusToTargetOrderStatus(shippoStatus);
-  if (!target) return null;
-  if (currentStatus === OrderStatus.CANCELLED) return null; // never override a cancelled order
-
-  const currentRank = ORDER_STATUS_RANK[currentStatus] ?? 0;
-  const targetRank = ORDER_STATUS_RANK[target] ?? 0;
-  if (targetRank > currentRank) return target;
-  return null;
-}
-
-/**
- * Pure mapping from a raw Shippo REST tracking-poll response
- * (`GET /tracks/{carrier}/{tracking_number}`) into our checkpoint shape.
- * No network calls — safe to unit test directly.
- */
-export function mapShippoTrackingResponseToCheckpoints(
-  data: ShippoTrackingResponse | null | undefined,
-): { currentStatus: string; checkpoints: TrackingCheckpoint[] } | null {
-  if (!data || !data.tracking_status || !data.tracking_status.status) {
-    return null;
-  }
-
-  const currentStatus = data.tracking_status.status;
-  const checkpoints: TrackingCheckpoint[] = (data.tracking_history || [])
-    .map((entry) => ({
-      status: entry.status,
-      description: entry.status_details || '',
-      location: formatShippoLocation(entry.location),
-      timestamp: entry.status_date || '',
-    }))
-    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
-
-  return { currentStatus, checkpoints };
-}
-
-function formatShippoLocation(location?: ShippoLocation): string | null {
-  if (!location) return null;
-  const parts = [location.city, location.state, location.country].filter((p) => !!p);
-  return parts.length ? parts.join(', ') : null;
-}
+// Shippo types and the pure tracking/status mapping helpers now live in
+// src/modules/shippo (shippo.types.ts / shippo.mapping.ts) alongside the
+// service that owns the HTTP calls. Re-exported here because several
+// consumers — WebhooksService, OrdersController and the frontend-facing
+// return types — already import them from this module, and a second copy of
+// the status map is exactly how the dead OUT_FOR_DELIVERY / PICKUP branches
+// survived unnoticed (neither is a real top-level Shippo status).
+export {
+  ShippoTrackingResponse,
+  TrackingCheckpoint,
+  TrackingResult,
+} from '../shippo/shippo.types';
+export {
+  ORDER_STATUS_RANK,
+  computeAdvancedOrderStatus,
+  mapShippoStatusToTargetOrderStatus,
+  mapShippoTrackingResponseToCheckpoints,
+} from '../shippo/shippo.mapping';
 
 /**
  * Single shared point for writing a tracking number onto an Order. Sets both
@@ -242,7 +138,8 @@ export class OrdersService {
     private readonly jwtService: JwtService,
     private readonly stripeService: StripeService,
     private readonly siteSettingsService: SiteSettingsService,
-    private readonly shipStationService: ShipStationService,
+    // private readonly shipStationService: ShipStationService, // disabled — see pushOrderToShipStation
+    private readonly shippoService: ShippoService,
     private readonly shippingRateTiersService: ShippingRateTiersService,
     private readonly emailService: EmailService,
   ) {}
@@ -575,6 +472,62 @@ export class OrdersService {
           ? { stockStatus: StockStatus.OUT_OF_STOCK }
           : {}),
       });
+    }
+  }
+
+  /**
+   * Puts inventory back when an order is cancelled — the missing counterpart
+   * to decrementStock().
+   *
+   * Without this, cancelling an order for 5 units left those 5 units gone
+   * from inventory forever, and any variant that the order had pushed to
+   * OUT_OF_STOCK stayed out of stock with real units on the shelf.
+   *
+   * Mirrors decrementStock's rules exactly:
+   *  - variants with stockQuantity null (untracked/unlimited) are skipped
+   *  - ON_BACKORDER is left alone; that is a deliberate admin state, not a
+   *    consequence of stock hitting zero
+   * Only lifts OUT_OF_STOCK back to IN_STOCK, so a variant an admin set to
+   * some other status isn't overwritten by a cancellation.
+   */
+  private async restoreStock(items: OrderItem[], manager?: EntityManager) {
+    const repo = manager ? manager.getRepository(ProductVariant) : this.variantsRepo;
+
+    const variantIds = (items || [])
+      .map((i) => i.productVariantId)
+      .filter((id): id is number => id != null);
+    if (variantIds.length === 0) return;
+
+    const variants = await repo.find({ where: { id: In(variantIds) } });
+    const byId = new Map(variants.map((v) => [v.id, v]));
+
+    // Summed per variant first: an order can legitimately carry the same
+    // variant on more than one line, and updating per line would only
+    // restore the last one.
+    const quantityByVariant = new Map<number, number>();
+    for (const item of items || []) {
+      if (item.productVariantId == null) continue;
+      quantityByVariant.set(
+        item.productVariantId,
+        (quantityByVariant.get(item.productVariantId) || 0) + item.quantity,
+      );
+    }
+
+    for (const [variantId, quantity] of quantityByVariant) {
+      const variant = byId.get(variantId);
+      // Variant deleted since the order was placed — nothing to restore to.
+      if (!variant || variant.stockQuantity == null) continue;
+
+      const restored = variant.stockQuantity + quantity;
+      await repo.update(variantId, {
+        stockQuantity: restored,
+        ...(restored > 0 && variant.stockStatus === StockStatus.OUT_OF_STOCK
+          ? { stockStatus: StockStatus.IN_STOCK }
+          : {}),
+      });
+      this.logger.log(
+        `Variant #${variantId} stock restored ${variant.stockQuantity} -> ${restored} (cancelled order).`,
+      );
     }
   }
 
@@ -936,21 +889,147 @@ export class OrdersService {
     return { total, customerOrders, guestOrders };
   }
 
+  /**
+   * Whether a customer may still cancel this order themselves.
+   *
+   * The decisive fact is the LABEL, not the status: once
+   * createShipmentForOrder buys one we have spent real carrier money and the
+   * parcel may already be moving, so it becomes a return rather than a
+   * cancellation. An order sits in PROCESSING both before and after the
+   * label is bought, which is why this checks `trackingNumber` rather than
+   * trusting the status alone.
+   *
+   * Returns a reason (not just false) so the UI can explain why the button
+   * is disabled instead of leaving a dead control on screen.
+   */
+  static customerCancelEligibility(order: Pick<Order, 'status' | 'trackingNumber'>): {
+    canCancel: boolean;
+    reason?: string;
+  } {
+    switch (order.status) {
+      case OrderStatus.CANCELLED:
+        return { canCancel: false, reason: 'This order is already cancelled.' };
+      case OrderStatus.DELIVERED:
+        return {
+          canCancel: false,
+          reason: 'This order has already been delivered. Please contact us to arrange a return.',
+        };
+      case OrderStatus.SHIPPED:
+        return {
+          canCancel: false,
+          reason: 'This order has already shipped. Please contact us to arrange a return.',
+        };
+      case OrderStatus.PENDING:
+        return { canCancel: true };
+      case OrderStatus.PROCESSING:
+        return order.trackingNumber
+          ? {
+              canCancel: false,
+              reason:
+                'A shipping label has already been purchased for this order. Please contact us to arrange a return.',
+            }
+          : { canCancel: true };
+      default:
+        // Unknown/new status: refuse rather than guess. Cancelling runs
+        // refunds and restocks, so the safe default is "no".
+        return { canCancel: false, reason: 'This order can no longer be cancelled online. Please contact us.' };
+    }
+  }
+
+  /**
+   * Customer-initiated cancellation.
+   *
+   * Ownership is enforced by loading with `userId` in the where clause, so
+   * one customer can never cancel another's order — a 404 rather than a 403,
+   * matching findOne and avoiding confirming that the order exists.
+   *
+   * Delegates to updateStatus once eligible, so a customer cancellation and
+   * an admin cancellation run exactly the same side effects (restock, coupon
+   * rollback, customer email, refund-required alert). Duplicating that here
+   * would be the obvious way for the two paths to drift apart.
+   */
+  async cancelByCustomer(userId: number, orderId: number) {
+    const order = await this.ordersRepo.findOne({ where: { id: orderId, userId } });
+    if (!order) throw new NotFoundException(`Order #${orderId} not found`);
+
+    const { canCancel, reason } = OrdersService.customerCancelEligibility(order);
+    if (!canCancel) {
+      this.logger.warn(
+        `User #${userId} tried to cancel order #${orderId} (status ${order.status}, tracking ${
+          order.trackingNumber || 'none'
+        }) — refused: ${reason}`,
+      );
+      throw new BadRequestException(reason);
+    }
+
+    this.logger.log(`Order #${orderId} cancelled by customer (user #${userId}).`);
+    return this.updateStatus(orderId, OrderStatus.CANCELLED);
+  }
+
   async updateStatus(id: number, status: OrderStatus) {
     const order = await this.ordersRepo.findOne({ where: { id }, relations: ['items', 'user'] });
     if (!order) throw new NotFoundException(`Order #${id} not found`);
     const previousStatus = order.status;
-    order.status = status;
-    const saved = await this.ordersRepo.save(order);
+
+    // Guarded on the TRANSITION, not the target status, so re-saving an
+    // already-cancelled order can never restock or refund a second time.
+    const isNewCancellation =
+      status === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED;
+
+    let saved: Order;
+
+    if (isNewCancellation) {
+      // Status, stock and coupon usage move together: a partial run would
+      // leave a cancelled order whose inventory was never returned, or
+      // inventory returned for an order still showing as active.
+      saved = await this.ordersRepo.manager.transaction(async (manager) => {
+        order.status = status;
+        const persisted = await manager.save(order);
+        await this.restoreStock(order.items || [], manager);
+        return persisted;
+      });
+
+      // Deliberately outside the transaction: it writes through
+      // CouponsService's own repositories, and a coupon-rollback failure
+      // must not roll back the cancellation itself. Logged loudly instead.
+      try {
+        await this.couponsService.revokeUsageForOrder(order.id);
+      } catch (err) {
+        this.logger.error(
+          `Order #${id} was cancelled but its coupon usage could NOT be revoked — ` +
+            `the customer's allowance is still consumed, fix by hand: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    } else {
+      order.status = status;
+      saved = await this.ordersRepo.save(order);
+    }
+
     this.logger.log(`Order #${id} status changed: ${previousStatus} -> ${status}`);
 
-    if (status === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED) {
+    if (isNewCancellation) {
       try {
         await this.emailService.sendOrderCancelledEmail(saved);
       } catch (err) {
         this.logger.warn(
           `Order cancellation email threw unexpectedly for order #${id}: ${err instanceof Error ? err.message : err}`,
         );
+      }
+
+      // Separate internal email, because no code here issues a Stripe
+      // refund — the customer has just been promised their money back, so
+      // somebody has to actually send it. Only fires when a payment was
+      // really captured.
+      if (saved.stripePaymentIntentId) {
+        try {
+          await this.emailService.sendRefundRequiredInternalNotification(saved);
+        } catch (err) {
+          this.logger.error(
+            `Refund-required notification FAILED for order #${id} — a refund is owed and nobody has been told: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
       }
     }
 
@@ -976,185 +1055,101 @@ export class OrdersService {
   }
 
   /**
-   * Auto-creates a Shippo shipment for an order right after payment capture,
-   * mirroring the real cocojojo.com site's flow where the Stripe webhook
-   * handler calls straight into ShippoService to create a shipment and buy a
-   * label the moment a payment succeeds (see shippo.service.ts createShipment
-   * + purchaseLabel). Adapted to our schema: we don't have structured
-   * address columns (just a free-text `shippingAddress` blob) or per-item
-   * weight, so the parcel/address_to fields below are best-effort — good
-   * enough to exercise the real request shape, not production-accurate.
+   * Buys a Shippo shipping label for an order right after payment capture and
+   * records the tracking number it returns. Shippo is the sole shipping
+   * provider — it creates the shipment, buys the label, returns the tracking
+   * number and (via the /tracks subscription made inside ShippoService)
+   * pushes the tracking updates that advance order status.
    *
-   * No-ops (never throws) when SHIPPO_API_KEY isn't configured, and never
-   * fabricates a tracking number — if Shippo isn't reachable/configured, the
-   * order simply has no tracking info yet, which is the truthful state.
+   * The HTTP mechanics now live in ShippoService; this method's job is the
+   * order-side work: load what Shippo needs, persist the result, and stay
+   * silent-but-honest when it can't be done.
+   *
+   * Never throws and never fabricates a tracking number — if Shippo isn't
+   * configured or refuses the shipment, the order simply has no tracking yet,
+   * which is the truthful state.
    */
   async createShipmentForOrder(orderId: number): Promise<void> {
-    const order = await this.ordersRepo.findOne({ where: { id: orderId } });
-    if (!order) {
-      this.logger.warn(`createShipmentForOrder: order #${orderId} not found — skipping.`);
-      return;
-    }
-
-    const apiKey = process.env.SHIPPO_API_KEY;
-    if (!apiKey) {
-      this.logger.warn(
-        `SHIPPO_API_KEY not configured — skipping auto shipment creation for order #${orderId}.`,
-      );
-      return;
-    }
-
-    if (order.shippoTrackingNumber) {
-      this.logger.warn(
-        `Order #${orderId} already has a Shippo tracking number (${order.shippoTrackingNumber}) — skipping duplicate shipment creation.`,
-      );
-      return;
-    }
-
-    try {
-      // TODO: replace with real warehouse address from config, same as the
-      // real site's ShippoService.convertOrderToShippoFormat (address_from
-      // is currently hardcoded there too, pending config wiring).
-      const addressFrom = {
-        name: process.env.SHIPPO_FROM_NAME || 'CocoJojo Warehouse',
-        street1: process.env.SHIPPO_FROM_STREET1 || '123 Warehouse St',
-        city: process.env.SHIPPO_FROM_CITY || 'Los Angeles',
-        state: process.env.SHIPPO_FROM_STATE || 'CA',
-        zip: process.env.SHIPPO_FROM_ZIP || '90001',
-        country: process.env.SHIPPO_FROM_COUNTRY || 'US',
-        phone: process.env.SHIPPO_FROM_PHONE || '555-123-4567',
-        email: process.env.SHIPPO_FROM_EMAIL || 'shipping@cocojojo.com',
-      };
-
-      // Our schema only stores shipping address as a single free-text field
-      // (Order.shippingAddress), not structured street/city/state/zip
-      // columns like the real site — use it as street1 and leave the
-      // structured fields to whatever contact info we do have.
-      const addressTo = {
-        name: order.guestName || `Order #${order.id} customer`,
-        street1: order.shippingAddress || '',
-        city: '',
-        state: '',
-        zip: '',
-        country: 'US',
-        phone: order.guestPhone || undefined,
-        email: order.guestEmail || undefined,
-      };
-
-      const parcel = {
-        length: 12,
-        width: 9,
-        height: 3,
-        distance_unit: 'in',
-        weight: 1,
-        mass_unit: 'lb',
-      };
-
-      const shipmentResponse = await axios.post(
-        'https://api.goshippo.com/shipments/',
-        {
-          address_from: addressFrom,
-          address_to: addressTo,
-          parcels: [parcel],
-          async: false,
-        },
-        {
-          headers: { Authorization: `ShippoToken ${apiKey}` },
-          timeout: 10000,
-        },
-      );
-
-      const rates: Array<{ object_id: string }> = shipmentResponse.data?.rates || [];
-      if (!rates.length) {
-        this.logger.warn(
-          `Shippo returned no rates for order #${orderId} — cannot purchase a label, skipping.`,
-        );
-        return;
-      }
-
-      const transactionResponse = await axios.post(
-        'https://api.goshippo.com/transactions/',
-        {
-          rate: rates[0].object_id,
-          label_file_type: 'PDF_4x6',
-          async: false,
-        },
-        {
-          headers: { Authorization: `ShippoToken ${apiKey}` },
-          timeout: 10000,
-        },
-      );
-
-      const transaction = transactionResponse.data;
-      const trackingNumber: string | undefined = transaction?.tracking_number;
-      const carrier: string | undefined = transaction?.rate?.provider;
-
-      if (!trackingNumber || !carrier) {
-        this.logger.warn(
-          `Shippo transaction for order #${orderId} did not return a tracking number/carrier — skipping.`,
-        );
-        return;
-      }
-
-      applyTrackingNumber(order, trackingNumber, carrier.toLowerCase());
-      await this.ordersRepo.save(order);
-      this.logger.log(
-        `Order #${orderId} shipment auto-created via Shippo: carrier=${carrier} trackingNumber=${trackingNumber}`,
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Shippo auto shipment creation failed for order #${orderId}: ${err instanceof Error ? err.message : err}`,
-      );
-    }
-  }
-
-  /**
-   * Pushes an order to ShipStation right after payment capture, mirroring
-   * the real cocojojo.com site's SHIPSTATION completion-job case (see
-   * stripe-completion-worker.service.ts, ~line 220) which dedupes on
-   * order.shipstationOrderId and calls straight into ShipStationService.
-   * Complementary to createShipmentForOrder's Shippo call, not a
-   * replacement — see ShipStationService's class doc for why both run.
-   *
-   * Loads items + user (needed to build the ShipStation request payload,
-   * neither of which the bare findOne in createShipmentForOrder needs).
-   * Never throws — a ShipStation-side failure must never break Stripe
-   * webhook acknowledgment, matching createShipmentForOrder's convention.
-   */
-  async pushOrderToShipStation(orderId: number): Promise<void> {
+    // Items are needed for the parcel weight, user for the recipient name —
+    // the previous bare findOne loaded neither, which is part of why the
+    // parcel had to be hardcoded.
     const order = await this.ordersRepo.findOne({
       where: { id: orderId },
       relations: ['items', 'user'],
     });
     if (!order) {
-      this.logger.warn(`pushOrderToShipStation: order #${orderId} not found — skipping.`);
+      this.logger.warn(`createShipmentForOrder: order #${orderId} not found — skipping.`);
       return;
     }
 
-    if (order.shipstationOrderId) {
-      this.logger.warn(
-        `Order #${orderId} already has a ShipStation order id (${order.shipstationOrderId}) — skipping duplicate push.`,
-      );
+    // Real per-variant weights, so the label is rated on what was actually
+    // bought rather than a hardcoded 1lb.
+    const variantIds = (order.items || [])
+      .map((item) => item.productVariantId)
+      .filter((id): id is number => id != null);
+    const variants = variantIds.length
+      ? await this.variantsRepo.find({ where: { id: In(variantIds) } })
+      : [];
+    const variantsById = new Map(variants.map((v) => [v.id, v]));
+
+    const result = await this.shippoService.purchaseLabelForOrder(order, variantsById);
+    if (!result.purchased) {
+      // ShippoService already logged the specific reason.
       return;
     }
 
-    try {
-      const shipstationOrderId = await this.shipStationService.createOrder(order);
-      if (!shipstationOrderId) {
-        // ShipStationService already logged the specific reason
-        // (not configured / API error / no orderId in response).
-        return;
-      }
-
-      order.shipstationOrderId = shipstationOrderId;
-      await this.ordersRepo.save(order);
-      this.logger.log(`Order #${orderId} shipstationOrderId persisted: ${shipstationOrderId}`);
-    } catch (err) {
-      this.logger.warn(
-        `ShipStation push threw unexpectedly for order #${orderId}: ${err instanceof Error ? err.message : err}`,
-      );
-    }
+    applyTrackingNumber(order, result.trackingNumber, result.carrier);
+    await this.ordersRepo.save(order);
+    this.logger.log(
+      `Order #${orderId} shipment created via Shippo: carrier=${result.carrier} trackingNumber=${result.trackingNumber}`,
+    );
   }
+
+  /* ------------------------------------------------------------------------
+   * ShipStation — DISABLED.
+   *
+   * Shippo is now the sole shipping provider. ShipStation is commented out
+   * rather than deleted so it can be restored if that decision changes; the
+   * module, service and DTOs are all still in the tree.
+   *
+   * Why it was replaced: ShipStation's V2 API (the generation our key is for)
+   * only creates a shipment RECORD — `POST /v2/shipments` returns a
+   * shipment_id and never a tracking number. Buying the label is a separate
+   * `POST /v2/labels` call that was never implemented, so this push produced
+   * no tracking number and no label. Shippo does the whole flow in one pass.
+   *
+   * To restore: uncomment this method, re-add ShipStationModule to
+   * orders.module.ts and the constructor injection below, and uncomment the
+   * call in WebhooksService.handleStripeEvent.
+   *
+   * async pushOrderToShipStation(orderId: number): Promise<void> {
+   *   const order = await this.ordersRepo.findOne({
+   *     where: { id: orderId },
+   *     relations: ['items', 'user'],
+   *   });
+   *   if (!order) {
+   *     this.logger.warn(`pushOrderToShipStation: order #${orderId} not found — skipping.`);
+   *     return;
+   *   }
+   *   if (order.shipstationOrderId) {
+   *     this.logger.warn(
+   *       `Order #${orderId} already has a ShipStation order id (${order.shipstationOrderId}) — skipping duplicate push.`,
+   *     );
+   *     return;
+   *   }
+   *   try {
+   *     const shipstationOrderId = await this.shipStationService.createOrder(order);
+   *     if (!shipstationOrderId) return;
+   *     order.shipstationOrderId = shipstationOrderId;
+   *     await this.ordersRepo.save(order);
+   *     this.logger.log(`Order #${orderId} shipstationOrderId persisted: ${shipstationOrderId}`);
+   *   } catch (err) {
+   *     this.logger.warn(
+   *       `ShipStation push threw unexpectedly for order #${orderId}: ${err instanceof Error ? err.message : err}`,
+   *     );
+   *   }
+   * }
+   * --------------------------------------------------------------------- */
 
   private async maybeAdvanceStatus(order: Order, shippoStatus: string) {
     const target = computeAdvancedOrderStatus(order.status, shippoStatus);
@@ -1168,6 +1163,77 @@ export class OrdersService {
     );
   }
 
+  /**
+   * On-demand tracking for the customer/admin timeline.
+   *
+   * The Shippo HTTP call and its response mapping now live in ShippoService;
+   * what stays here is the order lookup, the not-shipped-yet short-circuit,
+   * and the status auto-advance.
+   *
+   * The status advance stays on this read path deliberately: Shippo only
+   * pushes `track_updated` webhooks for tracking numbers registered via
+   * POST /tracks, so for any shipment created before that subscription
+   * existed this lookup is the only thing that moves status. It is
+   * forward-only (computeAdvancedOrderStatus), so it can never regress an
+   * order or resurrect a cancelled one.
+   */
+  /**
+   * Public guest tracking lookup: order id + the email that placed it.
+   *
+   * Security notes, since this is the only unauthenticated read of order data:
+   *  - Matching on email is what makes an id-only walk useless. Compared
+   *    case-insensitively because checkout does not normalize case, so a
+   *    customer who typed "Dexter@..." must still be able to look it up.
+   *  - Guest orders match on `guestEmail`; a registered user's order matches
+   *    on their account email too, so someone who ordered while logged in
+   *    can still track without signing in (they have the same two facts).
+   *  - A wrong email and a non-existent order return the SAME NotFound, so
+   *    this can't be used to discover which order ids or emails exist.
+   *  - Returns a deliberately narrow projection — status, dates, totals,
+   *    items and tracking. No addresses, no phone, no user id, no Stripe
+   *    ids: enough to answer "where is my order", nothing that would make
+   *    this worth attacking.
+   */
+  async trackAsGuest(orderId: number, email: string) {
+    const order = await this.ordersRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'user'],
+    });
+
+    const supplied = email.trim().toLowerCase();
+    const matches =
+      !!order &&
+      [order.guestEmail, order.user?.email]
+        .filter((e): e is string => !!e)
+        .some((e) => e.toLowerCase() === supplied);
+
+    if (!order || !matches) {
+      // Same message either way — see the note above.
+      this.logger.warn(`Guest tracking lookup failed for order #${orderId} (email mismatch or no such order).`);
+      throw new NotFoundException('No order found with that order number and email address.');
+    }
+
+    const tracking = await this.getTrackingCheckpoints(order.id);
+
+    return {
+      id: order.id,
+      status: order.status,
+      createdAt: order.createdAt,
+      total: order.total,
+      trackingNumber: order.trackingNumber,
+      carrierCode: order.carrierCode,
+      items: (order.items || []).map((i) => ({
+        id: i.id,
+        productName: i.productName,
+        variantLabel: i.variantLabel,
+        sku: i.sku,
+        quantity: i.quantity,
+        price: i.price,
+      })),
+      tracking,
+    };
+  }
+
   async getTrackingCheckpoints(orderId: number): Promise<TrackingResult> {
     const order = await this.ordersRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException(`Order #${orderId} not found`);
@@ -1176,45 +1242,17 @@ export class OrdersService {
       return { available: false, reason: 'not_shipped_yet' };
     }
 
-    const apiKey = process.env.SHIPPO_API_KEY;
-    if (!apiKey) {
-      return { available: false, reason: 'tracking_not_configured' };
+    const result = await this.shippoService.getTracking(order.carrierCode, order.trackingNumber);
+
+    if (result.available) {
+      await this.maybeAdvanceStatus(order, result.currentStatus);
+      return result;
     }
 
-    try {
-      const carrier =
-        order.carrierCode === CarrierCode.OTHER ? order.carrierCode : order.carrierCode;
-      const url = `https://api.goshippo.com/tracks/${encodeURIComponent(carrier)}/${encodeURIComponent(order.trackingNumber)}`;
-      const response = await axios.get<ShippoTrackingResponse>(url, {
-        headers: { Authorization: `ShippoToken ${apiKey}` },
-        timeout: 10000,
-      });
-
-      const data = response.data;
-      const mapped = mapShippoTrackingResponseToCheckpoints(data);
-      if (!mapped) {
-        this.logger.warn(
-          `Shippo tracking response for order #${orderId} (${order.carrierCode}/${order.trackingNumber}) is missing tracking_status — treating as lookup failure.`,
-        );
-        return { available: false, reason: 'lookup_failed' };
-      }
-      const { currentStatus, checkpoints } = mapped;
-
-      await this.maybeAdvanceStatus(order, currentStatus);
-
-      return {
-        available: true,
-        carrier: data.carrier,
-        trackingNumber: data.tracking_number,
-        currentStatus,
-        eta: data.eta ?? null,
-        checkpoints,
-      };
-    } catch (err) {
-      this.logger.warn(
-        `Shippo tracking lookup failed for order #${orderId} (${order.carrierCode}/${order.trackingNumber}): ${err instanceof Error ? err.message : err}`,
-      );
-      return { available: false, reason: 'lookup_failed' };
-    }
+    // Live lookup failed, but we still know the number and carrier — hand
+    // them back so the UI can show them and link to the carrier's own
+    // tracking page instead of a bare "unavailable" message.
+    return { ...result, carrier: order.carrierCode, trackingNumber: order.trackingNumber };
   }
+
 }

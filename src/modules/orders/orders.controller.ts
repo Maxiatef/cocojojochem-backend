@@ -21,6 +21,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { OrdersService } from './orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTrackingDto } from './dto/update-tracking.dto';
+import { GuestTrackDto } from './dto/guest-track.dto';
 import { ShippingEstimateDto } from './dto/shipping-estimate.dto';
 import { ZONE_BY_STATE, US_STATE_NAMES } from './shipping-zones.constants';
 
@@ -96,6 +97,19 @@ export class OrdersController {
     return this.ordersService.getTrackingCheckpoints(id);
   }
 
+  // Public: guest order tracking by order number + the email that placed it.
+  //
+  // POST, not GET, so the email never lands in a URL (and therefore never in
+  // access logs, browser history or a Referer header). Unauthenticated by
+  // necessity — guests have no account — so it is rate-limited hard: 10
+  // attempts per 10 minutes per IP makes brute-forcing the email for a known
+  // order id impractical, while leaving room for a customer who mistypes.
+  @Post('guest-track')
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
+  guestTrack(@Body() dto: GuestTrackDto) {
+    return this.ordersService.trackAsGuest(dto.orderId, dto.email);
+  }
+
   // Customer: live tracking lookup, restricted to the order's own owner.
   @Get(':id/tracking')
   @UseGuards(JwtAuthGuard)
@@ -104,6 +118,19 @@ export class OrdersController {
     // doesn't belong to this user) before doing the live lookup.
     await this.ordersService.findOne(req.user.id, id);
     return this.ordersService.getTrackingCheckpoints(id);
+  }
+
+  // Customer: cancel your own order, while it is still cancellable.
+  //
+  // Ownership is checked inside cancelByCustomer (loads by id + userId), and
+  // eligibility is re-checked there too — the disabled button in the UI is a
+  // convenience, never the security boundary. Throttled because each call
+  // can trigger a restock, a coupon rollback and two emails.
+  @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
+  cancelOwnOrder(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.cancelByCustomer(req.user.id, id);
   }
 
   @Get()

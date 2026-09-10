@@ -9,6 +9,7 @@ import {
   ProductSeo,
   StockStatus,
   ProductVisibility,
+  ProductDocument,
 } from '../../entities';
 import { withPricing } from '../../common/pricing.util';
 import { CreateProductDto, CreateVariantDto } from './dto/create-product.dto';
@@ -62,6 +63,8 @@ export class ProductsService {
     private readonly galleryRepo: Repository<ProductImage>,
     @InjectRepository(ProductSpec)
     private readonly specsRepo: Repository<ProductSpec>,
+    @InjectRepository(ProductDocument)
+    private readonly documentsRepo: Repository<ProductDocument>,
     @InjectRepository(ProductSeo)
     private readonly seoRepo: Repository<ProductSeo>,
   ) {}
@@ -493,7 +496,17 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto) {
-    const { variants, functionIds, certificationIds, gallery, specs, seo, scheduledPublishAt, ...productData } = dto;
+    const {
+      variants,
+      functionIds,
+      certificationIds,
+      gallery,
+      documents,
+      specs,
+      seo,
+      scheduledPublishAt,
+      ...productData
+    } = dto;
     const product = this.productsRepo.create({
       ...productData,
       // Overrides productData.isPublished: a future schedule always forces
@@ -531,6 +544,21 @@ export class ProductsService {
       await this.specsRepo.save(newSpecs);
     }
 
+    // Saved after the product (not nested like `gallery`) purely because it
+    // needs saved.id — same shape as specs above.
+    if (documents?.length) {
+      await this.documentsRepo.save(
+        documents.map((d) =>
+          this.documentsRepo.create({
+            productId: saved.id,
+            url: d.url,
+            type: d.type,
+            label: d.label ?? null,
+          }),
+        ),
+      );
+    }
+
     if (seo) {
       await this.upsertSeo(saved.id, seo);
     }
@@ -548,7 +576,17 @@ export class ProductsService {
   }
 
   async update(id: number, dto: UpdateProductDto) {
-    const { variants, functionIds, certificationIds, gallery, specs, seo, scheduledPublishAt, ...productData } = dto;
+    const {
+      variants,
+      functionIds,
+      certificationIds,
+      gallery,
+      documents,
+      specs,
+      seo,
+      scheduledPublishAt,
+      ...productData
+    } = dto;
     const product = await this.productsRepo.preload({
       id,
       ...productData,
@@ -589,6 +627,27 @@ export class ProductsService {
     }
 
     // Same delete-then-recreate approach as variants above.
+    // Same delete-then-recreate as gallery/variants. Guarded on `documents`
+    // being present at all (not on its length) so an explicitly-sent empty
+    // array clears the list, while an update that omits the key entirely —
+    // e.g. a partial save from another admin screen — leaves the paperwork
+    // alone instead of silently deleting it.
+    if (documents) {
+      await this.documentsRepo.delete({ productId: id });
+      if (documents.length > 0) {
+        await this.documentsRepo.save(
+          documents.map((d) =>
+            this.documentsRepo.create({
+              productId: id,
+              url: d.url,
+              type: d.type,
+              label: d.label ?? null,
+            }),
+          ),
+        );
+      }
+    }
+
     if (gallery) {
       await this.galleryRepo.delete({ productId: id });
       const newGallery = gallery.map((g, i) =>

@@ -35,10 +35,14 @@ export class CouponsController {
     return this.couponsService.validateCoupon(dto);
   }
 
+  // Reads are ADMIN + SALES — sales needs to see which promotions exist and
+  // how they're performing when quoting a customer. Creating, editing and
+  // deleting coupons stays ADMIN-only further down: a coupon is a direct
+  // discount on revenue.
   @Get()
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   findAll(@Query() query: QueryCouponsDto) {
     return this.couponsService.findAll(query);
   }
@@ -46,7 +50,7 @@ export class CouponsController {
   @Get('analytics/all')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   getAnalyticsAll() {
     return this.couponsService.getAnalyticsAll();
   }
@@ -54,7 +58,7 @@ export class CouponsController {
   @Get('helpers/search-products')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   searchProducts(@Query('q') q?: string) {
     return this.couponsService.searchProducts(q || '');
   }
@@ -62,7 +66,7 @@ export class CouponsController {
   @Get('helpers/search-categories')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   searchCategories(@Query('q') q?: string) {
     return this.couponsService.searchCategories(q || '');
   }
@@ -70,7 +74,7 @@ export class CouponsController {
   @Get('helpers/search-variants')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   searchVariants(@Query('q') q?: string) {
     return this.couponsService.searchVariants(q || '');
   }
@@ -78,7 +82,7 @@ export class CouponsController {
   @Get('analytics/:id')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   getAnalyticsForCoupon(@Param('id', ParseIntPipe) id: number) {
     return this.couponsService.getAnalyticsForCoupon(id);
   }
@@ -86,7 +90,7 @@ export class CouponsController {
   @Get(':id')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SALES)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.couponsService.findOne(id);
   }

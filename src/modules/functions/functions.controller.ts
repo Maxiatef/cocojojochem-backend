@@ -8,9 +8,14 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { IsOptional, IsString } from 'class-validator';
 import { ApiTags } from '@nestjs/swagger';
+import { UserRole } from '../../entities';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { FunctionsService } from './functions.service';
 
 class CreateFunctionDto {
@@ -68,17 +73,25 @@ export class FunctionsController {
     return this.functionsService.findProducts(slug, Number(page), Number(limit));
   }
 
+  // Writes are ADMIN-only. These endpoints previously had no guard at
+  // all, so any anonymous caller could mutate the catalog.
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   create(@Body() dto: CreateFunctionDto) {
     return this.functionsService.create(dto.name, dto.slug, dto.description);
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateFunctionDto) {
     return this.functionsService.update(id, dto);
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.functionsService.remove(id);
   }

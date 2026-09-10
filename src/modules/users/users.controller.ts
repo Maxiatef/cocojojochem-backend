@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -108,6 +109,31 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   sendPasswordReset(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.sendPasswordResetLink(id);
+  }
+
+  // Soft delete → Recycle Bin. The safe, reversible action gets the plain
+  // DELETE verb; the irreversible one below needs an explicit path segment.
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  softDelete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.usersService.softDelete(id, req.user.id);
+  }
+
+  // Declared before ':id/...' siblings for readability; the distinct path
+  // segment means order doesn't actually matter here.
+  @Delete(':id/permanent')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  purge(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.purge(id);
+  }
+
+  @Patch(':id/restore')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  restore(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.restore(id);
   }
 
   // "Log out everywhere" — revokes every live refresh token for the user

@@ -51,8 +51,32 @@ async function bootstrap() {
     res.header('Access-Control-Max-Age', '86400');
     next();
   };
-  app.use('/api/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads')));
-  app.use('/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads')));
+  // Files are served straight off disk from our own origin, so the response
+  // headers are the only thing standing between an uploaded file and the
+  // browser executing it as page content.
+  //
+  //  - `nosniff` stops content-type sniffing: without it a browser may
+  //    disregard the declared type and render, say, a .csv containing markup
+  //    as HTML on this origin.
+  //  - Anything that is not a PDF or a plain raster image is forced to
+  //    download rather than render. Office files are inert either way, but
+  //    the allowlist means a type added later is safe by default.
+  //  - PDFs and images keep `inline` so a certificate opens in a new browser
+  //    tab, which is how the product page links them.
+  const INLINE_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
+  const staticOptions: Parameters<typeof express.static>[1] = {
+    setHeaders: (res, filePath) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+      res.setHeader(
+        'Content-Disposition',
+        INLINE_EXTENSIONS.includes(ext) ? 'inline' : 'attachment',
+      );
+    },
+  };
+
+  app.use('/api/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads'), staticOptions));
+  app.use('/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads'), staticOptions));
 
   // Stripe requires the raw request body to verify webhook signatures.
   // Registered first (and bodyParser is disabled above) so this route's body
@@ -140,9 +164,9 @@ function logStartupBanner(port: number, requestedPort: number, bootMs: number) {
   const integrations: [string, string | undefined][] = [
     ['Stripe', process.env.STRIPE_SECRET_KEY],
     ['Stripe webhook', process.env.STRIPE_WEBHOOK_SECRET],
-    ['Brevo email', process.env.BREVO_API_KEY],
+    ['Resend email', process.env.RESEND_API_KEY],
     ['Shippo', process.env.SHIPPO_API_KEY],
-    ['ShipStation', process.env.SHIPSTATION_API_KEY],
+    // ShipStation intentionally omitted — disabled in favour of Shippo.
   ];
   const configured = integrations.filter(([, v]) => !!v).map(([k]) => k);
   const missing = integrations.filter(([, v]) => !v).map(([k]) => k);

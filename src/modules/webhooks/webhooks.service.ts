@@ -121,13 +121,19 @@ export class WebhooksService {
           `Auto shipment creation threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
         );
       }
-      try {
-        await this.ordersService.pushOrderToShipStation(order.id);
-      } catch (err) {
-        this.logger.warn(
-          `ShipStation push threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
-        );
-      }
+      // ShipStation push — DISABLED. Shippo (createShipmentForOrder above) is
+      // now the sole shipping provider: it buys the label and returns the
+      // tracking number in one pass, which ShipStation's V2 API cannot do
+      // (POST /v2/shipments yields only a shipment record, never a tracking
+      // number). Kept commented for a one-line restore.
+      //
+      // try {
+      //   await this.ordersService.pushOrderToShipStation(order.id);
+      // } catch (err) {
+      //   this.logger.warn(
+      //     `ShipStation push threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
+      //   );
+      // }
       if (!wasAlreadyProcessed) {
         try {
           await this.emailService.sendOrderConfirmationEmail(order);
@@ -322,7 +328,14 @@ export class WebhooksService {
       return { received: true };
     }
 
-    const order = await this.ordersRepo.findOne({ where: { shippoTrackingNumber: trackingNumber } });
+    // Relations are loaded because a shipping-confirmation email needs the
+    // items and the customer. The previous version loaded neither, which is
+    // why this path silently never emailed the customer while the (now
+    // disabled) ShipStation path did.
+    const order = await this.ordersRepo.findOne({
+      where: { shippoTrackingNumber: trackingNumber },
+      relations: ['items', 'user'],
+    });
     if (!order) {
       this.logger.warn(`No order found for Shippo tracking number ${trackingNumber} — ignoring.`);
       return { received: true };
@@ -341,6 +354,19 @@ export class WebhooksService {
       order.status = nextStatus;
       await this.ordersRepo.save(order);
       this.logger.log(`Order #${order.id} marked ${nextStatus} via Shippo tracking update (${trackingStatus}), was ${previousStatus}.`);
+
+      // Only on the first transition into SHIPPED — computeAdvancedOrderStatus
+      // is forward-only, so this can't fire twice for the same order, and a
+      // later DELIVERED update won't re-send it.
+      if (nextStatus === OrderStatus.SHIPPED) {
+        try {
+          await this.emailService.sendShippingConfirmationEmail(order);
+        } catch (err) {
+          this.logger.warn(
+            `Shipping confirmation email threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
     }
 
     return { received: true };

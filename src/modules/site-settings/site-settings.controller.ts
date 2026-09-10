@@ -26,9 +26,10 @@ export class SiteSettingsController {
   getIntegrationsStatus() {
     return {
       stripe: !!process.env.STRIPE_SECRET_KEY,
-      shipstation: !!process.env.SHIPSTATION_API_KEY,
-      brevo: !!process.env.BREVO_API_KEY,
+      resend: !!process.env.RESEND_API_KEY,
+      // Shippo is the shipping provider; ShipStation is disabled in code.
       shippo: !!process.env.SHIPPO_API_KEY,
+      // shipstation: !!process.env.SHIPSTATION_API_KEY, // disabled
     };
   }
 

@@ -15,4 +15,10 @@ export class QueryUsersDto {
   @IsOptional()
   @IsString()
   role?: string;
+
+  // Comma-separated statuses, e.g. "DELETED" for the admin Recycle Bin.
+  // Omitted means ACTIVE only — see UsersService.applyUserFilters.
+  @IsOptional()
+  @IsString()
+  status?: string;
 }

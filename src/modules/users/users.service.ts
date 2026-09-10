@@ -1,9 +1,16 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Order, PasswordResetRequest, QuoteRequest, RefreshToken, User, UserRole } from '../../entities';
+import { Order, PasswordResetRequest, QuoteRequest, RefreshToken, User, UserRole, UserStatus } from '../../entities';
 import { hashToken } from '../../common/hash-token';
 import { EmailService } from '../email/email.service';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -38,15 +45,29 @@ export class UsersService {
     return this.usersRepo.findOne({ where: { email }, relations: ['company'] });
   }
 
-  // Backs the clickable role stat cards atop the admin Users page.
+  // Backs the clickable stat cards atop the admin Users page.
+  // The four role counts are scoped to ACTIVE so they keep summing to Total —
+  // recycled users are counted separately by the Recycle Bin tile instead.
   async getStats() {
-    const [total, customers, sales, admins] = await Promise.all([
-      this.usersRepo.count(),
-      this.usersRepo.count({ where: { role: UserRole.CUSTOMER } }),
-      this.usersRepo.count({ where: { role: UserRole.SALES } }),
-      this.usersRepo.count({ where: { role: UserRole.ADMIN } }),
+    const [total, customers, sales, admins, deleted] = await Promise.all([
+      this.usersRepo.count({ where: { status: UserStatus.ACTIVE } }),
+      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.CUSTOMER } }),
+      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.SALES } }),
+      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.ADMIN } }),
+      this.usersRepo.count({ where: { status: UserStatus.DELETED } }),
     ]);
-    return { total, customers, sales, admins };
+    return { total, customers, sales, admins, deleted };
+  }
+
+  // Narrow per-request lookup for JwtStrategy. Deliberately not findById():
+  // that joins `company` and throws NotFoundException (a 404, not a 401).
+  // This runs on EVERY authenticated request, so it selects four scalar
+  // columns off the primary key and nothing else.
+  authLookup(id: number) {
+    return this.usersRepo.findOne({
+      where: { id },
+      select: ['id', 'email', 'role', 'status'],
+    });
   }
 
   async findById(id: number) {
@@ -70,6 +91,31 @@ export class UsersService {
     return this.usersRepo.save(user);
   }
 
+  // Shared by findAllAdmin's page query AND its separate count query. These
+  // two used to carry duplicated copies of the same filters, which is exactly
+  // how a filter gets added to one and not the other and the pagination
+  // totals silently drift.
+  private applyUserFilters(qb: SelectQueryBuilder<User>, query: QueryUsersDto) {
+    if (query.search) {
+      qb.andWhere('(user.fullName ILIKE :search OR user.email ILIKE :search)', {
+        search: `%${query.search}%`,
+      });
+    }
+    if (query.role) {
+      const roles = query.role.split(',').map((r) => r.trim().toUpperCase());
+      qb.andWhere('user.role IN (:...roles)', { roles });
+    }
+    // Recycled users are hidden unless explicitly asked for, so the Recycle
+    // Bin never leaks into the normal list — and any other caller that lists
+    // users (e.g. a staff picker hitting ?role=SALES) gets that for free.
+    if (query.status) {
+      const statuses = query.status.split(',').map((x) => x.trim().toUpperCase());
+      qb.andWhere('user.status IN (:...statuses)', { statuses });
+    } else {
+      qb.andWhere('user.status = :activeStatus', { activeStatus: UserStatus.ACTIVE });
+    }
+  }
+
   // Admin list — all users regardless of role, with company name, order count, and total spent.
   async findAllAdmin(query: QueryUsersDto) {
     const page = Number(query.page) || 1;
@@ -85,15 +131,7 @@ export class UsersService {
       .addGroupBy('company.id')
       .orderBy('user.createdAt', 'DESC');
 
-    if (query.search) {
-      qb.andWhere('(user.fullName ILIKE :search OR user.email ILIKE :search)', {
-        search: `%${query.search}%`,
-      });
-    }
-    if (query.role) {
-      const roles = query.role.split(',').map((r) => r.trim().toUpperCase());
-      qb.andWhere('user.role IN (:...roles)', { roles });
-    }
+    this.applyUserFilters(qb, query);
 
     qb.offset((page - 1) * limit).limit(limit);
 
@@ -105,15 +143,7 @@ export class UsersService {
     }));
 
     const totalQb = this.usersRepo.createQueryBuilder('user');
-    if (query.search) {
-      totalQb.andWhere('(user.fullName ILIKE :search OR user.email ILIKE :search)', {
-        search: `%${query.search}%`,
-      });
-    }
-    if (query.role) {
-      const roles = query.role.split(',').map((r) => r.trim().toUpperCase());
-      totalQb.andWhere('user.role IN (:...roles)', { roles });
-    }
+    this.applyUserFilters(totalQb, query);
     const total = await totalQb.getCount();
 
     return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
@@ -204,6 +234,135 @@ export class UsersService {
     this.logger.log(`Admin set password for user #${id} (${user.email}); revoked ${revokedSessions} session(s)`);
 
     return { success: true, revokedSessions };
+  }
+
+  // --- Soft delete / restore / permanent delete ------------------------------
+
+  // Admin accounts are never deletable through the UI: to offboard an admin,
+  // change their role first. Shared by softDelete and purge.
+  private assertDeletable(user: User, actingAdminId?: number) {
+    if (user.role === UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Admin accounts cannot be deleted. Change the role to Sales or Customer first.',
+      );
+    }
+    // Unreachable while the role check above stands, but kept so the
+    // guarantee survives that rule being relaxed — mirrors the
+    // self-demotion guard in the controller.
+    if (actingAdminId != null && user.id === actingAdminId) {
+      throw new ForbiddenException('You cannot delete your own account.');
+    }
+  }
+
+  // Moves a user to the Recycle Bin: they can no longer log in, and existing
+  // sessions are killed. Reversible — cart, quote list and quote requests are
+  // deliberately left untouched so a restore is lossless.
+  async softDelete(id: number, actingAdminId: number) {
+    const user = await this.findById(id);
+    this.assertDeletable(user, actingAdminId);
+
+    // Idempotent: a double-clicked confirm button must not 400.
+    if (user.status === UserStatus.DELETED) {
+      return { success: true, alreadyDeleted: true, revokedSessions: 0 };
+    }
+
+    // Status is written FIRST because it's the authoritative gate — if the
+    // revoke below failed, JwtStrategy and refresh() would still block them.
+    user.status = UserStatus.DELETED;
+    user.deletedAt = new Date();
+    await this.usersRepo.save(user);
+
+    const revokedSessions = await this.revokeAllSessions(id);
+
+    // Otherwise a reset code already in their inbox is a way back in.
+    await this.passwordResetRepo.update({ userId: id, usedAt: IsNull() }, { usedAt: new Date() });
+
+    this.logger.log(
+      `User #${id} (${user.email}) moved to recycle bin by admin #${actingAdminId}; revoked ${revokedSessions} session(s)`,
+    );
+    return { success: true, alreadyDeleted: false, revokedSessions };
+  }
+
+  async restore(id: number) {
+    const user = await this.findById(id);
+    if (user.status === UserStatus.ACTIVE) {
+      return { success: true, alreadyActive: true };
+    }
+    user.status = UserStatus.ACTIVE;
+    user.deletedAt = null;
+    await this.usersRepo.save(user);
+    // Sessions are NOT un-revoked — they sign in fresh.
+    this.logger.log(`User #${id} (${user.email}) restored from recycle bin`);
+    return { success: true, alreadyActive: false };
+  }
+
+  // Permanently removes the user row. Always succeeds for a recycled
+  // non-admin: order history survives because the customer's details are
+  // copied onto the order's guest columns before detaching, so revenue
+  // reporting and order emails are unaffected.
+  async purge(id: number) {
+    const user = await this.findById(id);
+    this.assertDeletable(user);
+
+    // Must go through the bin first, so no single stray DELETE can remove a
+    // live account.
+    if (user.status !== UserStatus.DELETED) {
+      throw new BadRequestException(
+        'Only users in the Recycle Bin can be permanently deleted. Move them there first.',
+      );
+    }
+
+    const [orderCount, quoteCount] = await Promise.all([
+      this.ordersRepo.count({ where: { userId: id } }),
+      this.quoteRequestsRepo.count({ where: { userId: id } }),
+    ]);
+
+    // One transaction: a partial run would leave a live user whose sessions
+    // and cart had already been destroyed.
+    await this.usersRepo.manager.transaction(async (m) => {
+      // 1) orders.userId is ON DELETE NO ACTION, so it must be detached or
+      //    the delete below fails. Copy the customer onto the guest columns
+      //    first (all nullable, used for guest checkout) so the order keeps
+      //    its contact details — EmailService resolves recipients as
+      //    `order.user?.email || order.guestEmail`, so without this every
+      //    future email for these orders would silently skip.
+      //    COALESCE so a pre-existing guest value is never overwritten.
+      await m.query(
+        `UPDATE "orders"
+            SET "guestEmail" = COALESCE("guestEmail", $2),
+                "guestName"  = COALESCE("guestName",  $3),
+                "guestPhone" = COALESCE("guestPhone", $4),
+                "userId"     = NULL
+          WHERE "userId" = $1`,
+        [id, user.email, user.fullName, user.phone],
+      );
+
+      // 2) quote_requests.userId is also NO ACTION, but the row already
+      //    stores its own fullName/email/phone, so detaching loses nothing.
+      await m.query(`UPDATE "quote_requests" SET "userId" = NULL WHERE "userId" = $1`, [id]);
+
+      // 3) These four carry a userId with NO foreign key at all — Postgres
+      //    will not clean them up, so without this they'd be silently
+      //    orphaned (live refresh tokens among them).
+      await m.query(`DELETE FROM "refresh_tokens" WHERE "userId" = $1`, [id]);
+      await m.query(`DELETE FROM "password_reset_requests" WHERE "userId" = $1`, [id]);
+      await m.query(`DELETE FROM "quote_list_items" WHERE "userId" = $1`, [id]);
+      await m.query(`DELETE FROM "pending_checkouts" WHERE "userId" = $1`, [id]);
+
+      // 4) carts (ON DELETE CASCADE) and cart_items (cascade from carts) are
+      //    removed transitively by this delete — noted so the omission reads
+      //    as deliberate.
+      //
+      //    coupon_usages is keyed by email, not userId, so a purge does NOT
+      //    reset this person's per-customer coupon limits. Deliberate:
+      //    otherwise delete-and-recreate would be a coupon farm.
+      await m.delete(User, { id });
+    });
+
+    this.logger.warn(
+      `User #${id} (${user.email}) PERMANENTLY DELETED. ${orderCount} order(s) and ${quoteCount} quote request(s) detached and kept.`,
+    );
+    return { success: true, detachedOrders: orderCount, detachedQuoteRequests: quoteCount };
   }
 
   // Revokes every live refresh token for a user, signing them out of every

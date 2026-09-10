@@ -11,7 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { StockStatus, ProductVisibility } from '../../../entities';
+import { StockStatus, ProductVisibility, DocType } from '../../../entities';
 
 export class CreateVariantDto {
   @IsString()
@@ -79,6 +79,18 @@ export class CreateVariantDto {
   @IsOptional()
   @IsBoolean()
   isSoldByDrum?: boolean;
+}
+
+export class ProductDocumentDto {
+  @IsString()
+  url: string;
+
+  @IsEnum(DocType)
+  type: DocType;
+
+  @IsOptional()
+  @IsString()
+  label?: string;
 }
 
 export class GalleryImageDto {
@@ -193,6 +205,17 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => GalleryImageDto)
   gallery?: GalleryImageDto[];
+
+  // Downloadable paperwork (COA / SDS / TDS / spec sheets) plus scanned
+  // certificates, stored as ProductDocument rows. Deliberately NOT part of
+  // `gallery`: create()/update() derive the product's cover `imageUrl` from
+  // gallery[0].url, so a PDF landing first there would become the product
+  // thumbnail across the whole storefront.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductDocumentDto)
+  documents?: ProductDocumentDto[];
 
   @IsOptional()
   @IsBoolean()

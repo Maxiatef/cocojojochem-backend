@@ -1,31 +1,21 @@
-import { Module } from '@nestjs/common';
+import { BadRequestException, Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { UploadController } from './upload.controller';
 import { UploadService } from './upload.service';
+import { subfolderForRequestUrl } from './upload-subfolders';
 
 // Ported from the real cocojojo.com upload.module.ts — same destination
 // routing by request URL, same filename generation pattern, same fileFilter/limits.
+
 @Module({
   imports: [
     MulterModule.register({
       storage: diskStorage({
         destination: (req, _file, cb) => {
-          let subfolder = 'temp';
-
-          if (req.url.includes('/product-image')) {
-            subfolder = req.body?.subfolder || 'products';
-          } else if (req.url.includes('/variant-image')) {
-            subfolder = 'variants';
-          } else if (req.url.includes('/category-image')) {
-            subfolder = 'categories';
-          } else if (req.url.includes('/multiple-images')) {
-            subfolder = req.body?.subfolder || 'gallery';
-          }
-
-          const uploadDir = join('./uploads', subfolder);
+          const uploadDir = join('./uploads', subfolderForRequestUrl(req.url));
           if (!existsSync(uploadDir)) {
             mkdirSync(uploadDir, { recursive: true });
           }
@@ -43,7 +33,12 @@ import { UploadService } from './upload.service';
         if (allowedMimeTypes.includes(file.mimetype)) {
           cb(null, true);
         } else {
-          cb(new Error(`Invalid file type. Allowed types: ${allowedMimeTypes.join(', ')}`), false);
+          // BadRequestException rather than Error, so the client gets a 400
+          // naming the allowed types instead of an opaque 500.
+          cb(
+            new BadRequestException(`Invalid file type. Allowed types: ${allowedMimeTypes.join(', ')}`),
+            false,
+          );
         }
       },
       limits: {

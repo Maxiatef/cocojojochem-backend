@@ -20,7 +20,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { AccountStatus, RefreshToken, PasswordResetRequest, UserRole } from '../../entities';
+import { AccountStatus, RefreshToken, PasswordResetRequest, UserRole, UserStatus } from '../../entities';
 import { hashToken } from '../../common/hash-token';
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -46,6 +46,18 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
+      // A recycled account still occupies the users.email unique index, so
+      // re-registration can't succeed. Deliberately NOT auto-restoring:
+      // anyone knowing a deleted customer's email could otherwise resurrect
+      // the account, inherit its order history and set a new password.
+      // The copy is branched so support can act on it, but never says
+      // "deleted" — that would be account enumeration.
+      if (existing.status !== UserStatus.ACTIVE) {
+        this.logger.warn(`Registration rejected — email belongs to a recycled account: ${dto.email}`);
+        throw new ConflictException(
+          "This email address can't be used to register. Please contact support.",
+        );
+      }
       this.logger.warn(`Registration rejected — email already in use: ${dto.email}`);
       throw new ConflictException('Email already registered');
     }
@@ -87,6 +99,15 @@ export class AuthService {
       throw new UnauthorizedException('Incorrect email or password');
     }
 
+    // Checked AFTER the password compare on purpose: checking earlier would
+    // make this endpoint an account-status oracle for anyone who merely knows
+    // an email address. Having passed the compare, they've proved they own
+    // the account, so a specific message is safe and far kinder.
+    if (user.status !== UserStatus.ACTIVE) {
+      this.logger.warn(`Login blocked — account not active: ${user.email} (id=${user.id})`);
+      throw new UnauthorizedException('This account is no longer active. Please contact support.');
+    }
+
     this.logger.log(
       `User logged in: ${user.email} (id=${user.id}, role=${user.role})`,
     );
@@ -120,6 +141,13 @@ export class AuthService {
   // otherwise this endpoint could be used to enumerate registered emails.
   async forgotPassword(dto: ForgotPasswordDto) {
     const user = await this.usersService.findByEmail(dto.email);
+    // A recycled account must not be able to reset its way back in. The
+    // uniform `{ success: true }` below is returned either way, so this
+    // stays non-enumerating.
+    if (user && user.status !== UserStatus.ACTIVE) {
+      this.logger.warn(`Password reset requested for a non-active account: ${dto.email}`);
+      return { success: true };
+    }
     if (user) {
       const code = String(crypto.randomInt(0, 100000)).padStart(5, '0');
       const codeHash = this.hashToken(code);
@@ -154,7 +182,8 @@ export class AuthService {
   // final resetPassword() call, so the low-entropy code can't be replayed.
   async verifyResetCode(dto: VerifyResetCodeDto) {
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user) {
+    // Same opaque message for a non-active account as for an unknown one.
+    if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Invalid or expired code');
     }
 
@@ -210,6 +239,12 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid or expired reset token');
     }
+    // Final gate: a token minted before the account was recycled must not
+    // still work. Same opaque message as every other failure on this path.
+    if (user.status !== UserStatus.ACTIVE) {
+      this.logger.warn(`Password reset blocked — account not active: ${user.email} (id=${user.id})`);
+      throw new UnauthorizedException('Invalid or expired reset token');
+    }
 
     user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await this.usersService.save(user);
@@ -248,6 +283,14 @@ export class AuthService {
 
     const user = await this.usersService.findById(existing.userId);
     if (!user) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    // Defence in depth: softDelete already revokes refresh tokens, but this
+    // makes the lockout correct even if that revoke failed — otherwise a live
+    // token keeps minting access tokens for up to 30 days. Deliberately
+    // reuses the opaque message rather than naming the real reason.
+    if (user.status !== UserStatus.ACTIVE) {
+      this.logger.warn(`Refresh blocked — account not active: ${user.email} (id=${user.id})`);
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 

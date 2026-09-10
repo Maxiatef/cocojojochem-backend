@@ -6,7 +6,10 @@ import { UsersModule } from '../users/users.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { SiteSettingsModule } from '../site-settings/site-settings.module';
-import { ShipStationModule } from '../shipstation/shipstation.module';
+// ShipStation is disabled — Shippo is the sole shipping provider.
+// Uncomment this and the entry in `imports` below to restore it.
+// import { ShipStationModule } from '../shipstation/shipstation.module';
+import { ShippoModule } from '../shippo/shippo.module';
 import { EmailModule } from '../email/email.module';
 import { ShippingRateTiersModule } from '../shipping-rate-tiers/shipping-rate-tiers.module';
 import { OrdersService } from './orders.service';
@@ -19,7 +22,8 @@ import { OrdersController } from './orders.controller';
     CouponsModule,
     StripeModule,
     SiteSettingsModule,
-    ShipStationModule,
+    // ShipStationModule, // disabled
+    ShippoModule,
     EmailModule,
     ShippingRateTiersModule,
     JwtModule.register({

@@ -373,6 +373,40 @@ export class CouponsService {
     this.logger.log(`Coupon #${couponId} usage recorded for ${email}${orderId ? ` (order #${orderId})` : ''}`);
   }
 
+  /**
+   * Undoes incrementUsage for a cancelled order.
+   *
+   * Without this, cancelling an order permanently burned the customer's
+   * coupon allowance: `usageCount` stayed raised and the CouponUsage row
+   * stayed behind, so a single-use code could never be used again and a
+   * per-customer limit counted an order that no longer exists.
+   *
+   * Idempotent — `CouponUsage.orderId` is UNIQUE, so there is at most one
+   * row per order, and a second call simply finds nothing and no-ops. That
+   * matters because a double-clicked Cancel button must not decrement twice.
+   *
+   * Returns true when a usage was actually revoked.
+   */
+  async revokeUsageForOrder(orderId: number): Promise<boolean> {
+    const usage = await this.couponUsageRepo.findOne({ where: { orderId } });
+    if (!usage) return false;
+
+    await this.couponUsageRepo.delete({ id: usage.id });
+
+    // Clamped rather than a bare decrement: usageCount is also editable by
+    // admins, so it could already be 0 and must never go negative.
+    const coupon = await this.couponsRepo.findOne({ where: { id: usage.couponId } });
+    if (coupon) {
+      await this.couponsRepo.update(
+        { id: usage.couponId },
+        { usageCount: Math.max((coupon.usageCount || 0) - 1, 0) },
+      );
+    }
+
+    this.logger.log(`Coupon #${usage.couponId} usage revoked for order #${orderId} (${usage.email}).`);
+    return true;
+  }
+
   async getAnalyticsAll() {
     const total = await this.couponsRepo.count();
     const active = await this.couponsRepo.count({ where: { isActive: true } });

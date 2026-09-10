@@ -19,6 +19,19 @@ export enum UserRole {
   SALES = 'SALES',
 }
 
+// Soft-delete state. DELETED accounts can't log in and appear in the admin
+// Recycle Bin, from where they're either restored or permanently deleted.
+//
+// Deliberately NOT TypeORM's @DeleteDateColumn: that appends
+// `deletedAt IS NULL` to every query app-wide, which would strip the customer
+// off past orders (see the leftJoinAndSelect('order.user') in
+// OrdersService.findAllAdmin) unless `withDeleted: true` were added in a dozen
+// places. An explicit enum leaves every existing query behaving as it does now.
+export enum UserStatus {
+  ACTIVE = 'ACTIVE',
+  DELETED = 'DELETED',
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()
@@ -49,6 +62,16 @@ export class User {
 
   @Column({ type: 'enum', enum: UserRole, default: UserRole.CUSTOMER })
   role: UserRole;
+
+  // The single authoritative gate for whether this account may be used.
+  // Checked in JwtStrategy (every request), login, refresh, and the
+  // password-reset paths. Never branch on `deletedAt` — it exists only so the
+  // Recycle Bin can show when the account was removed.
+  @Column({ type: 'enum', enum: UserStatus, default: UserStatus.ACTIVE })
+  status: UserStatus;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deletedAt: Date | null;
 
   @Column({ type: 'int', nullable: true })
   companyId: number | null;
