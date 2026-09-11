@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import {
   Product,
   ProductImage,
@@ -10,11 +10,13 @@ import {
   StockStatus,
   ProductVisibility,
   ProductDocument,
+  DocType,
 } from '../../entities';
 import { withPricing } from '../../common/pricing.util';
 import { CreateProductDto, CreateVariantDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
+import { SeoAnalyzerService } from '../seo-analyzer/seo-analyzer.service';
 
 // Quantity is the source of truth for IN_STOCK/OUT_OF_STOCK — an admin
 // shouldn't have to separately remember to flip a status dropdown after
@@ -67,6 +69,7 @@ export class ProductsService {
     private readonly documentsRepo: Repository<ProductDocument>,
     @InjectRepository(ProductSeo)
     private readonly seoRepo: Repository<ProductSeo>,
+    private readonly seoAnalyzer: SeoAnalyzerService,
   ) {}
 
   private baseQuery() {
@@ -190,7 +193,21 @@ export class ProductsService {
     await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
       where: { id },
-      relations: ['category', 'variants', 'functions', 'certifications', 'gallery', 'specs', 'seo'],
+      // `documents` matters more than it looks: the admin edit form builds its
+      // state from this payload and always posts `documents` back, so omitting
+      // the relation here made the form load an empty list and wipe every
+      // attached certificate on the next save.
+      relations: [
+        'category',
+        'variants',
+        'functions',
+        'certifications',
+        'gallery',
+        'documents',
+        'documents.certification',
+        'specs',
+        'seo',
+      ],
     });
     if (!product) throw new NotFoundException(`Product #${id} not found`);
     return this.decorate(product);
@@ -355,6 +372,8 @@ export class ProductsService {
         'certifications',
         'gallery',
         'documents',
+        // So the storefront can link a certification badge to its own PDF.
+        'documents.certification',
         'specs',
         'seo',
       ],
@@ -554,6 +573,7 @@ export class ProductsService {
             url: d.url,
             type: d.type,
             label: d.label ?? null,
+            certificationId: d.type === DocType.CERTIFICATE ? (d.certificationId ?? null) : null,
           }),
         ),
       );
@@ -562,6 +582,8 @@ export class ProductsService {
     if (seo) {
       await this.upsertSeo(saved.id, seo);
     }
+
+    await this.refreshSeoScore(saved.id);
 
     this.logger.log(`Product created: "${saved.name}" (id=${saved.id}, sku=${saved.sku})`);
     return saved;
@@ -608,72 +630,144 @@ export class ProductsService {
     if (!product) throw new NotFoundException(`Product #${id} not found`);
     const saved = await this.productsRepo.save(product);
 
-    // Variants are replaced wholesale (delete-then-recreate) rather than diffed —
-    // simple and correct since a product's variant list is small and edited as a whole.
     if (variants) {
-      await this.variantsRepo.delete({ productId: id });
-      const newVariants = variants.map((v) =>
-        this.variantsRepo.create({
-          ...v,
-          productId: id,
-          price: String(v.price),
-          salePrice: v.salePrice != null ? String(v.salePrice) : null,
-          weightLb: v.weightLb != null ? String(v.weightLb) : null,
+      await this.syncChildren(this.variantsRepo, id, variants, (v: CreateVariantDto) => {
+        // `id` is the match key, never a column to write; the rest of the DTO
+        // maps straight across.
+        const { id: _id, price, salePrice, weightLb, availableFrom, ...rest } = v;
+        return {
+          ...rest,
+          price: String(price),
+          salePrice: salePrice != null ? String(salePrice) : null,
+          weightLb: weightLb != null ? String(weightLb) : null,
           stockStatus: resolveStockStatus(v),
-          availableFrom: v.availableFrom ? new Date(v.availableFrom) : null,
-        }),
-      );
-      await this.variantsRepo.save(newVariants);
+          availableFrom: availableFrom ? new Date(availableFrom) : null,
+        };
+      });
     }
 
-    // Same delete-then-recreate approach as variants above.
-    // Same delete-then-recreate as gallery/variants. Guarded on `documents`
-    // being present at all (not on its length) so an explicitly-sent empty
-    // array clears the list, while an update that omits the key entirely —
-    // e.g. a partial save from another admin screen — leaves the paperwork
-    // alone instead of silently deleting it.
+    // Guarded on `documents` being present at all (not on its length) so an
+    // explicitly-sent empty array clears the list, while an update that omits
+    // the key entirely — e.g. a partial save from another admin screen —
+    // leaves the paperwork alone instead of silently deleting it. Same for
+    // gallery and specs below.
     if (documents) {
-      await this.documentsRepo.delete({ productId: id });
-      if (documents.length > 0) {
-        await this.documentsRepo.save(
-          documents.map((d) =>
-            this.documentsRepo.create({
-              productId: id,
-              url: d.url,
-              type: d.type,
-              label: d.label ?? null,
-            }),
-          ),
-        );
-      }
+      await this.syncChildren(this.documentsRepo, id, documents, (d) => ({
+        url: d.url,
+        type: d.type,
+        label: d.label ?? null,
+        // Cleared whenever the kind isn't CERTIFICATE, so switching a file
+        // from "USDA Organic" to "COA" can't leave a stale link behind.
+        certificationId: d.type === DocType.CERTIFICATE ? (d.certificationId ?? null) : null,
+      }));
     }
 
     if (gallery) {
-      await this.galleryRepo.delete({ productId: id });
-      const newGallery = gallery.map((g, i) =>
-        this.galleryRepo.create({
-          productId: id,
-          url: g.url,
-          altText: g.altText ?? null,
-          sortOrder: g.sortOrder ?? i,
-        }),
-      );
-      await this.galleryRepo.save(newGallery);
+      await this.syncChildren(this.galleryRepo, id, gallery, (g, i) => ({
+        url: g.url,
+        altText: g.altText ?? null,
+        sortOrder: g.sortOrder ?? i,
+      }));
     }
 
-    // Same delete-then-recreate approach as variants/gallery above.
     if (specs) {
-      await this.specsRepo.delete({ productId: id });
-      const newSpecs = specs.map((s) => this.specsRepo.create({ ...s, productId: id }));
-      await this.specsRepo.save(newSpecs);
+      await this.syncChildren(this.specsRepo, id, specs, (sp) => {
+        const { id: _id, ...rest } = sp;
+        return rest;
+      });
     }
 
     if (seo) {
       await this.upsertSeo(id, seo);
     }
 
+    await this.refreshSeoScore(id);
+
     this.logger.log(`Product updated: "${saved.name}" (id=${saved.id})`);
     return this.findById(id);
+  }
+
+  /**
+   * Reconciles one of a product's child collections against what the admin
+   * submitted, matching rows on their `id`.
+   *
+   * This replaces a delete-then-recreate approach. That was simpler, but it
+   * handed every child row a brand-new primary key on every single product
+   * save, and `OrderItem.productVariantId` is ON DELETE SET NULL — so merely
+   * editing a product's name silently detached every past order item from its
+   * variant. It also made the change history unreadable: "renamed the product"
+   * and "replaced all the variants" produced identical database activity.
+   *
+   * A row carrying a known `id` is patched in place; one without is inserted;
+   * anything already stored that the payload no longer mentions is removed.
+   * An id belonging to a different product is not in `byId`, so it is treated
+   * as new rather than letting one product edit another's rows.
+   *
+   * `remove()` rather than `delete()` deliberately: `delete()` compiles to a
+   * bare DELETE and fires no entity event, so the audit log would never see
+   * the removal.
+   */
+  private async syncChildren<T extends ObjectLiteral & { id: number }>(
+    repo: Repository<T>,
+    productId: number,
+    incoming: { id?: number }[],
+    toColumns: (row: any, index: number) => Record<string, unknown>,
+  ): Promise<void> {
+    const existing = await repo.findBy({ productId } as any);
+    const byId = new Map(existing.map((row) => [row.id, row]));
+    const kept = new Set<number>();
+
+    for (const [index, row] of incoming.entries()) {
+      const columns = toColumns(row, index);
+      const current = row.id != null ? byId.get(row.id) : undefined;
+
+      if (current) {
+        kept.add(current.id);
+        // save() diffs against the stored row and skips the UPDATE entirely
+        // when nothing actually differs — which is what keeps an unrelated
+        // product edit from generating a pile of no-op child changes.
+        Object.assign(current, columns);
+        await repo.save(current);
+      } else {
+        await repo.save(repo.create({ ...columns, productId } as any));
+      }
+    }
+
+    const removed = existing.filter((row) => !kept.has(row.id));
+    if (removed.length > 0) {
+      await repo.remove(removed);
+    }
+  }
+
+  /**
+   * Refreshes the stored SEO score after a save.
+   *
+   * Never throws past its own boundary: a scoring failure must not fail the
+   * product save that triggered it. The number is a cached convenience — the
+   * editor recomputes it live from the same function either way.
+   */
+  private async refreshSeoScore(productId: number): Promise<void> {
+    try {
+      const result = await this.seoAnalyzer.scoreSavedProduct(productId);
+      if (!result) return;
+
+      // Upsert, not update: a product that has never had its SEO panel filled
+      // in has no product_seo row at all, and an update() would silently match
+      // nothing — leaving exactly the products that most need a score without
+      // one.
+      const existing = await this.seoRepo.findOne({ where: { productId } });
+      await this.seoRepo.save(
+        this.seoRepo.create({
+          ...(existing ?? { productId }),
+          seoScore: result.score,
+          seoCheckedAt: new Date(),
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Could not refresh the SEO score for product #${productId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   async remove(id: number) {

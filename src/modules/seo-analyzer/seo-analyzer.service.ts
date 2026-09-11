@@ -3,8 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SeoMetric, SeoPage } from '../../entities';
+import { SeoMetric, SeoPage, Product, ProductSeo} from '../../entities';
 import { SeoIssue, SeoIssueSeverity, SeoIssueType } from '../../entities/SeoIssue';
+import {
+  analyzeProductSeo,
+  ProductSeoInput,
+  ProductSeoResult,
+} from './product-seo.rules';
 
 const KNOWN_TOP_LEVEL_PATHS = ['/', '/products', '/categories', '/functions', '/a-z'];
 const MAX_PATHS = 20;
@@ -23,6 +28,12 @@ interface ExtractedPageData {
   pageLoadTimeMs: number;
 }
 
+/**
+ * Per-product analysis. Separate from the crawler above on purpose: that one
+ * fetches live URLs and scores whole pages, this reads database fields and
+ * scores one product — so it works on an unpublished draft with nothing
+ * running.
+ */
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -33,6 +44,10 @@ export class SeoAnalyzerService {
   private readonly baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
   constructor(
+    @InjectRepository(Product)
+    private readonly productsRepo: Repository<Product>,
+    @InjectRepository(ProductSeo)
+    private readonly productSeoRepo: Repository<ProductSeo>,
     @InjectRepository(SeoMetric)
     private readonly seoMetricRepo: Repository<SeoMetric>,
     @InjectRepository(SeoIssue)
@@ -279,5 +294,62 @@ export class SeoAnalyzerService {
 
   async getMetrics() {
     return this.seoMetricRepo.find({ order: { path: 'ASC' } });
+  }
+
+  // ------------------------------------------------------- per-product SEO
+
+  /**
+   * Scores one product and explains what to fix.
+   *
+   * Stateless — it writes nothing — so the admin form can call it on every
+   * keystroke (debounced) and get the same number that will later be stored.
+   * The duplicate-title/description checks need the rest of the catalogue,
+   * which is why this lives in a service rather than being run in the browser.
+   */
+  async analyzeProduct(input: ProductSeoInput): Promise<ProductSeoResult> {
+    const qb = this.productSeoRepo
+      .createQueryBuilder('seo')
+      .select(['seo.seoTitle', 'seo.metaDescription', 'seo.productId']);
+
+    if (input.productId) {
+      qb.where('seo.productId != :id', { id: input.productId });
+    }
+    const others = await qb.getMany();
+
+    return analyzeProductSeo({
+      ...input,
+      existingTitles: others.map((o) => o.seoTitle).filter((t): t is string => !!t),
+      existingDescriptions: others
+        .map((o) => o.metaDescription)
+        .filter((d): d is string => !!d),
+    });
+  }
+
+  /**
+   * Builds the analyser input from a saved product, so create/update can
+   * store the score without the caller assembling the shape by hand.
+   */
+  async scoreSavedProduct(productId: number): Promise<ProductSeoResult | null> {
+    const product = await this.productsRepo.findOne({
+      where: { id: productId },
+      relations: ['seo', 'gallery'],
+    });
+    if (!product) return null;
+
+    const gallery = product.gallery || [];
+    return this.analyzeProduct({
+      productId: product.id,
+      name: product.name,
+      slug: product.slug,
+      shortDescription: product.shortDescription,
+      chemicalDescriptions: product.chemicalDescriptions,
+      inciName: product.inciName,
+      casNumber: product.casNumber,
+      focusKeyphrase: product.seo?.focusKeyphrase ?? null,
+      seoTitle: product.seo?.seoTitle ?? null,
+      metaDescription: product.seo?.metaDescription ?? null,
+      imageCount: gallery.length,
+      imagesWithAlt: gallery.filter((g) => !!g.altText && g.altText.trim().length > 0).length,
+    });
   }
 }

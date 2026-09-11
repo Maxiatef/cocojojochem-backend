@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -38,6 +38,7 @@ import {
   ShippingRateTier,
   QuoteListItem,
   PendingCheckout,
+  AuditLog,
 } from './entities';
 
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -74,6 +75,8 @@ import { ShippingRateTiersModule } from './modules/shipping-rate-tiers/shipping-
 // import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
+import { AuditLogModule } from './modules/audit-log/audit-log.module';
+import { AuditInterceptor } from './common/audit/audit.interceptor';
 
 @Module({
   imports: [
@@ -130,6 +133,7 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
         ShippingRateTier,
         QuoteListItem,
   PendingCheckout,
+  AuditLog,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: true,
@@ -162,11 +166,18 @@ import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
     // SeoPagesModule, // disabled — see comment above the import
     SiteSettingsModule,
     SeoAnalyzerModule,
+    AuditLogModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    // Opens the per-request audit context. Guards run before interceptors, so
+    // req.user is already populated by the time this sees the request.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
     },
   ],
 })

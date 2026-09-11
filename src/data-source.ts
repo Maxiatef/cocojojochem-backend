@@ -37,6 +37,7 @@ import {
   ShippingRateTier,
   QuoteListItem,
   PendingCheckout,
+  AuditLog,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -82,6 +83,7 @@ export const AppDataSource = new DataSource({
     ShippingRateTier,
     QuoteListItem,
   PendingCheckout,
+  AuditLog,
   ],
   migrations: ['src/migrations/*.ts'],
 });

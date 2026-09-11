@@ -31,3 +31,4 @@ export * from './PageView';
 export * from './ShippingRateTier';
 export * from './QuoteListItem';
 export * from './PendingCheckout';
+export * from './AuditLog';

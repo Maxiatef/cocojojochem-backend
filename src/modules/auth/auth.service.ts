@@ -14,13 +14,22 @@ import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
 import { CompaniesService } from '../companies/companies.service';
 import { EmailService } from '../email/email.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyResetCodeDto } from './dto/verify-reset-code.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { AccountStatus, RefreshToken, PasswordResetRequest, UserRole, UserStatus } from '../../entities';
+import {
+  AccountStatus,
+  RefreshToken,
+  PasswordResetRequest,
+  UserRole,
+  UserStatus,
+  AuditAction,
+  AuditActorType,
+} from '../../entities';
 import { hashToken } from '../../common/hash-token';
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -37,6 +46,7 @@ export class AuthService {
     private readonly companiesService: CompaniesService,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly auditLog: AuditLogService,
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepo: Repository<RefreshToken>,
     @InjectRepository(PasswordResetRequest)
@@ -86,16 +96,63 @@ export class AuthService {
     return this.buildToken(user.id, user.email, user.role);
   }
 
+  /**
+   * Staff auth events, which no database subscriber can see — nothing is
+   * written to a table when someone signs in, or fails to.
+   *
+   * Customer logins are deliberately not recorded: the audit log is scoped to
+   * admin/staff accountability, and logging every storefront sign-in would
+   * bury that. A failed attempt has no authenticated actor by definition, so
+   * it is recorded against the email that was tried.
+   */
+  private async auditAuth(
+    action: AuditAction,
+    user: { id: number; email: string; role: string } | null,
+    attemptedEmail: string,
+    summary: string,
+  ): Promise<void> {
+    const role = user?.role;
+    const isStaff = role === UserRole.ADMIN || role === UserRole.SALES;
+
+    // A failed attempt is worth recording whoever it was aimed at — repeated
+    // failures against an admin address are exactly what this log is for.
+    if (!isStaff && action !== AuditAction.LOGIN_FAILED) return;
+
+    await this.auditLog.record({
+      action,
+      actorType: role === UserRole.SALES ? AuditActorType.SALES : AuditActorType.ADMIN,
+      actorId: user?.id ?? null,
+      actorEmail: user?.email ?? attemptedEmail,
+      actorRole: role ?? null,
+      entityName: 'User',
+      entityId: user ? String(user.id) : 'unknown',
+      entityLabel: user?.email ?? attemptedEmail,
+      summary,
+    });
+  }
+
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user || !user.passwordHash) {
       this.logger.warn(`Login failed — no account for email: ${dto.email}`);
+      await this.auditAuth(
+        AuditAction.LOGIN_FAILED,
+        null,
+        dto.email,
+        `Failed sign-in for ${dto.email} — no such account`,
+      );
       throw new NotFoundException('No account found with this email');
     }
 
     const valid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!valid) {
       this.logger.warn(`Login failed — bad password for: ${user.email} (id=${user.id})`);
+      await this.auditAuth(
+        AuditAction.LOGIN_FAILED,
+        user,
+        dto.email,
+        `Failed sign-in for ${user.email} — incorrect password`,
+      );
       throw new UnauthorizedException('Incorrect email or password');
     }
 
@@ -105,12 +162,19 @@ export class AuthService {
     // the account, so a specific message is safe and far kinder.
     if (user.status !== UserStatus.ACTIVE) {
       this.logger.warn(`Login blocked — account not active: ${user.email} (id=${user.id})`);
+      await this.auditAuth(
+        AuditAction.LOGIN_FAILED,
+        user,
+        dto.email,
+        `Blocked sign-in for ${user.email} — account is ${user.status}`,
+      );
       throw new UnauthorizedException('This account is no longer active. Please contact support.');
     }
 
     this.logger.log(
       `User logged in: ${user.email} (id=${user.id}, role=${user.role})`,
     );
+    await this.auditAuth(AuditAction.LOGIN, user, dto.email, `${user.email} signed in`);
     return this.buildToken(user.id, user.email, user.role);
   }
 
@@ -132,6 +196,9 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    // Not audited explicitly: this saves the User entity while the admin is
+    // authenticated, so the subscriber already records it as an UPDATE with
+    // passwordHash «redacted». An extra event here would double-log it.
     await this.usersService.save(user);
     this.logger.log(`Password changed for user #${userId} (${user.email})`);
     return { success: true };
@@ -249,6 +316,17 @@ export class AuthService {
     user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await this.usersService.save(user);
 
+    // This path is unauthenticated, so the request carries no actor and the
+    // subscriber's User update is dropped by the scope gate. Recorded here
+    // instead, attributed to the account itself — "this password was reset via
+    // the emailed link" is exactly what an audit log exists to answer.
+    await this.auditAuth(
+      AuditAction.PASSWORD_CHANGE,
+      user,
+      user.email,
+      `Password for ${user.email} was reset via ${request.adminInitiated ? 'an admin-issued link' : 'the forgot-password flow'}`,
+    );
+
     request.usedAt = new Date();
     await this.passwordResetRepo.save(request);
 
@@ -310,6 +388,15 @@ export class AuthService {
       if (existing && !existing.revokedAt) {
         existing.revokedAt = new Date();
         await this.refreshTokenRepo.save(existing);
+
+        // RefreshToken is skip-listed (it churns constantly and holds a token
+        // hash), so the subscriber never sees this — the sign-out has to be
+        // recorded explicitly or the log would show staff signing in and never
+        // leaving.
+        const user = await this.usersService.authLookup(existing.userId);
+        if (user) {
+          await this.auditAuth(AuditAction.LOGOUT, user, user.email, `${user.email} signed out`);
+        }
       }
     }
     return { success: true };

@@ -33,4 +33,14 @@ export class ProductSeo {
 
   @Column({ type: 'text', array: true, nullable: true })
   tags: string[] | null;
+
+  // Last computed by analyzeProductSeo(), refreshed on every product save.
+  // Stored so the product list can show it and weak products can be found in
+  // bulk — the live score in the editor comes from the same function, so the
+  // two can never disagree.
+  @Column({ type: 'int', nullable: true })
+  seoScore: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  seoCheckedAt: Date | null;
 }

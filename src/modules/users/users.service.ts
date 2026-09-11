@@ -7,10 +7,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Order, PasswordResetRequest, QuoteRequest, RefreshToken, User, UserRole, UserStatus } from '../../entities';
+import {
+  Order,
+  PasswordResetRequest,
+  QuoteRequest,
+  RefreshToken,
+  User,
+  UserRole,
+  UserStatus,
+  AuditAction,
+  AuditActorType,
+} from '../../entities';
 import { hashToken } from '../../common/hash-token';
 import { EmailService } from '../email/email.service';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -28,6 +39,7 @@ export class UsersService {
   private readonly logger = new Logger('Users');
 
   constructor(
+    private readonly auditLog: AuditLogService,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
     @InjectRepository(Order)
@@ -373,7 +385,27 @@ export class UsersService {
       { userId, revokedAt: IsNull() },
       { revokedAt: new Date() },
     );
-    return result.affected ?? 0;
+    const revoked = result.affected ?? 0;
+
+    // Two reasons the subscriber can't see this: RefreshToken is skip-listed,
+    // and `.update()` fires no usable event anyway. Forcing someone out of
+    // every session is significant enough to record explicitly.
+    if (revoked > 0) {
+      const user = await this.authLookup(userId);
+      await this.auditLog.record({
+        action: AuditAction.SESSION_REVOKE,
+        actorType: AuditActorType.ADMIN,
+        actorId: userId,
+        actorEmail: user?.email ?? null,
+        actorRole: user?.role ?? null,
+        entityName: 'User',
+        entityId: String(userId),
+        entityLabel: user?.email ?? null,
+        summary: `Revoked ${revoked} active session${revoked === 1 ? '' : 's'} for ${user?.email ?? `user #${userId}`}`,
+      });
+    }
+
+    return revoked;
   }
 
   // Admin "Send Reset Link": mints a password-reset request that is ALREADY

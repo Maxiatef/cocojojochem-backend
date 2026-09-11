@@ -14,6 +14,15 @@ import {
 import { StockStatus, ProductVisibility, DocType } from '../../../entities';
 
 export class CreateVariantDto {
+  // Identifies an EXISTING row so update() can patch it in place. Absent for
+  // a row being added. Without it the server receives an anonymous list and
+  // cannot tell an edit from a delete-plus-add, which is why this used to be
+  // replaced wholesale on every save — detaching past order items from their
+  // variant (OrderItem.productVariantId is ON DELETE SET NULL).
+  @IsOptional()
+  @IsInt()
+  id?: number;
+
   @IsString()
   sku: string;
 
@@ -82,6 +91,11 @@ export class CreateVariantDto {
 }
 
 export class ProductDocumentDto {
+  // See CreateVariantDto.id — present for an existing row, absent for a new one.
+  @IsOptional()
+  @IsInt()
+  id?: number;
+
   @IsString()
   url: string;
 
@@ -91,9 +105,20 @@ export class ProductDocumentDto {
   @IsOptional()
   @IsString()
   label?: string;
+
+  // Which certification this file is the proof of. Only meaningful when
+  // `type` is CERTIFICATE; ignored otherwise.
+  @IsOptional()
+  @IsInt()
+  certificationId?: number;
 }
 
 export class GalleryImageDto {
+  // See CreateVariantDto.id — present for an existing row, absent for a new one.
+  @IsOptional()
+  @IsInt()
+  id?: number;
+
   @IsString()
   url: string;
 
@@ -107,6 +132,11 @@ export class GalleryImageDto {
 }
 
 export class ProductSpecDto {
+  // See CreateVariantDto.id — present for an existing row, absent for a new one.
+  @IsOptional()
+  @IsInt()
+  id?: number;
+
   @IsString()
   key: string;
 
