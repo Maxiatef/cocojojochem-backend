@@ -16,4 +16,15 @@ export class SeoPage {
 
   @Column({ type: 'varchar', nullable: true })
   ogImageUrl: string | null;
+
+  /**
+   * The term this page is meant to rank for.
+   *
+   * Unlike the other columns this one never reaches the storefront — it is an
+   * input to the SEO crawl. Without it Yoast's nine keyphrase assessments
+   * cannot run, which is why an unset page scores identically to every other
+   * page sharing its layout.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  focusKeyphrase: string | null;
 }

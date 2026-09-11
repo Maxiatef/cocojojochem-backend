@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SeoMetric, SeoPage, Product, ProductSeo} from '../../entities';
+import { analyzePageWithYoast } from './page-yoast.rules';
 import { SeoIssue, SeoIssueSeverity, SeoIssueType } from '../../entities/SeoIssue';
 import {
   analyzeProductSeo,
@@ -16,6 +17,7 @@ const MAX_PATHS = 20;
 const FETCH_DELAY_MS = 300;
 
 interface ExtractedPageData {
+  html?: string;
   title: string | null;
   metaDescription: string | null;
   h1Tag: string | null;
@@ -97,6 +99,7 @@ export class SeoAnalyzerService {
     });
 
     return {
+      html: response.data,
       title,
       metaDescription,
       h1Tag,
@@ -199,6 +202,23 @@ export class SeoAnalyzerService {
     try {
       const data = await this.fetchAndExtract(path);
       const seoScore = this.computeScore(data);
+
+      // The page's own SEO override, if an admin has saved one. The keyphrase
+      // is what unlocks Yoast's keyphrase assessments; the title and
+      // description are read from the RENDERED page rather than from here,
+      // since the rendered values are what Google actually sees — if an
+      // override has been saved but the page has not been rebuilt, the crawl
+      // should report reality, not intent.
+      const override = await this.seoPageRepo.findOne({ where: { path } });
+
+      const yoastResult = analyzePageWithYoast({
+        html: data.html || '<html></html>',
+        title: data.title || undefined,
+        metaDescription: data.metaDescription || undefined,
+        focusKeyphrase: override?.focusKeyphrase || undefined,
+        path,
+      });
+
       const now = new Date();
 
       let metric = await this.seoMetricRepo.findOne({ where: { path } });
@@ -216,6 +236,12 @@ export class SeoAnalyzerService {
         imagesWithAltText: data.imagesWithAltText,
         pageLoadTimeMs: data.pageLoadTimeMs,
         seoScore,
+        yoastSeoScore: yoastResult.seoScore,
+        readabilityScore: yoastResult.readabilityScore,
+        seoProblems: yoastResult.seoProblems,
+        readabilityProblems: yoastResult.readabilityProblems,
+        yoastChecks: yoastResult.checks,
+        skippedChecks: yoastResult.skippedChecks,
         lastAnalyzed: now,
       });
       metric = await this.seoMetricRepo.save(metric);
@@ -257,9 +283,16 @@ export class SeoAnalyzerService {
     const issues = await this.seoIssueRepo.find();
 
     const totalPagesAnalyzed = metrics.length;
-    const scored = metrics.filter((m) => m.seoScore !== null);
+    // Averaged over Yoast's score, falling back to our own rubric for rows
+    // crawled before Yoast was wired in. Our rubric is deliberately generous
+    // (it rates "has a title, has a meta description, has words" and lands on
+    // 100 for nearly everything), so headlining it made the card useless as a
+    // signal — every page looked perfect.
+    const scored = metrics.filter((m) => m.yoastSeoScore !== null || m.seoScore !== null);
     const averageScore = scored.length
-      ? Math.round(scored.reduce((sum, m) => sum + (m.seoScore || 0), 0) / scored.length)
+      ? Math.round(
+          scored.reduce((sum, m) => sum + (m.yoastSeoScore ?? m.seoScore ?? 0), 0) / scored.length,
+        )
       : 0;
 
     const issuesBySeverity: Record<string, number> = {

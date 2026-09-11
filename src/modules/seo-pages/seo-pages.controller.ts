@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -25,6 +37,18 @@ export class SeoPagesController {
   @Roles(UserRole.ADMIN)
   findAll() {
     return this.seoPagesService.findAll();
+  }
+
+  /**
+   * Save the override for a path without the caller needing to know whether a
+   * row exists. Used by the per-page editor in the admin SEO table.
+   */
+  @Put('by-path')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  upsertByPath(@Query('path') path: string, @Body() dto: UpdateSeoPageDto) {
+    return this.seoPagesService.upsertByPath(path, dto);
   }
 
   @Get(':id')

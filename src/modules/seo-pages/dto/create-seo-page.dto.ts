@@ -15,4 +15,8 @@ export class CreateSeoPageDto {
   @IsOptional()
   @IsString()
   ogImageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  focusKeyphrase?: string;
 }

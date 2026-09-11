@@ -38,6 +38,38 @@ export class SeoMetric {
   @Column({ type: 'int', nullable: true })
   seoScore: number | null;
 
+  /**
+   * Yoast's own SEO verdict, kept separate from `seoScore` above.
+   *
+   * The two measure different things and routinely disagree: `seoScore` is our
+   * catalogue rubric (has a title, has a meta description, enough words),
+   * while this one is Yoast's blog-tuned analysis. Collapsing them into one
+   * column would silently discard whichever ran second.
+   */
+  @Column({ type: 'int', nullable: true })
+  yoastSeoScore: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  readabilityScore: number | null;
+
+  @Column({ type: 'int', default: 0 })
+  seoProblems: number;
+
+  @Column({ type: 'int', default: 0 })
+  readabilityProblems: number;
+
+  /** The full Yoast feedback list — see PageYoastCheck in page-yoast.rules.ts. */
+  @Column({ type: 'jsonb', nullable: true })
+  yoastChecks: any | null;
+
+  /**
+   * Assessments Yoast returned that were excluded as inapplicable — the
+   * keyphrase family, which a crawled page has no field for. Stored so the UI
+   * can say so out loud rather than quietly showing a shorter list.
+   */
+  @Column({ type: 'int', default: 0 })
+  skippedChecks: number;
+
   @Column({ type: 'timestamptz', nullable: true })
   lastAnalyzed: Date | null;
 

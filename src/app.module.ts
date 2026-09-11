@@ -64,15 +64,12 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { HealthModule } from './modules/health/health.module';
 import { ShippingRateTiersModule } from './modules/shipping-rate-tiers/shipping-rate-tiers.module';
-// SeoPagesModule is disabled — no admin UI edits SeoPage rows anymore (the
-// Meta Tags editor tab on /admin/seo was removed). Left commented, not
-// deleted, so it can be re-enabled later. Note: with this commented out,
-// `GET /seo-pages/by-path` 404s, and the storefront's generateMetadata()
-// calls on /, /products, /categories, /functions, /a-z gracefully fall back
-// to their hardcoded default titles/descriptions (serverFetch treats a
-// non-ok response as "no override" rather than throwing) — any previously
-// saved per-path overrides simply stop applying until this is uncommented.
-// import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
+// Re-enabled: the per-page SEO fields in the admin SEO table edit these rows,
+// and the storefront's generateMetadata() on /, /products, /categories,
+// /functions and /a-z already calls `GET /seo-pages/by-path`. While this was
+// commented out every one of those calls 404'd on each render and fell back to
+// its hardcoded default.
+import { SeoPagesModule } from './modules/seo-pages/seo-pages.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 import { SeoAnalyzerModule } from './modules/seo-analyzer/seo-analyzer.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
@@ -163,7 +160,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
     TrackingModule,
     HealthModule,
     ShippingRateTiersModule,
-    // SeoPagesModule, // disabled — see comment above the import
+    SeoPagesModule,
     SiteSettingsModule,
     SeoAnalyzerModule,
     AuditLogModule,
