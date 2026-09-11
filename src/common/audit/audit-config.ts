@@ -125,7 +125,17 @@ export function pickLabel(entityName: string, values: Record<string, unknown>): 
  * still captured in a CREATE/DELETE snapshot, where the timestamp is real
  * information.
  */
-export const IGNORED_DIFF_FIELDS = new Set(['updatedAt', 'createdAt', 'version']);
+export const IGNORED_DIFF_FIELDS = new Set([
+  'updatedAt',
+  'createdAt',
+  'version',
+  // Written by refreshSeoScore() after every product save, not by a person.
+  // Logging them made a plain "saved the product with no edits" show up as a
+  // ProductSeo change with a timestamp moving by a few seconds — noise that
+  // buries the edits someone actually made.
+  'seoScore',
+  'seoCheckedAt',
+]);
 
 export const REDACTED = '«redacted»';
 
