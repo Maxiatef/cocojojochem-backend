@@ -1,9 +1,8 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { BulkSalesService } from './bulk-sales.service';
 import { CreateBulkSaleDto } from './dto/create-bulk-sale.dto';
 import { UpdateBulkSaleDto } from './dto/update-bulk-sale.dto';
@@ -13,35 +12,36 @@ import { UpdateBulkSaleDto } from './dto/update-bulk-sale.dto';
 // Class default is staff-wide so sales can view the bulk-sale campaigns shown
 // on the admin Coupons page; each write route below re-tightens to ADMIN.
 @Controller('bulk-sales')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.SALES)
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class BulkSalesController {
   constructor(private readonly bulkSalesService: BulkSalesService) {}
 
   @Get()
+  @RequirePermission('canViewBulkSales')
   findAll() {
     return this.bulkSalesService.findAll();
   }
 
   @Get(':id')
+  @RequirePermission('canViewBulkSales')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.bulkSalesService.findOne(id);
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canCreateBulkSale')
   create(@Body() dto: CreateBulkSaleDto) {
     return this.bulkSalesService.create(dto);
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canEditBulkSale')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBulkSaleDto) {
     return this.bulkSalesService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canDeleteBulkSale')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.bulkSalesService.remove(id);
   }

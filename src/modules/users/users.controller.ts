@@ -13,10 +13,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { UsersService } from './users.service';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -30,15 +29,15 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canViewUsers')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAllAdmin(@Query() query: QueryUsersDto) {
     return this.usersService.findAllAdmin(query);
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canCreateUser')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   createStaff(@Body() dto: CreateStaffUserDto) {
     return this.usersService.createStaff(dto);
   }
@@ -46,8 +45,8 @@ export class UsersController {
   // Declared before ':id' — 'admin' would otherwise be swallowed as an id
   // and rejected by ParseIntPipe on that route.
   @Get('admin/stats')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canViewUsers')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getStats() {
     return this.usersService.getStats();
   }
@@ -59,44 +58,44 @@ export class UsersController {
   // hash stripped rather than removed outright, in case something external
   // depends on this route existing.
   @Get(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canViewUsers')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const { passwordHash, ...safeUser } = await this.usersService.findById(id);
     return safeUser;
   }
 
   @Get(':id/detail')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canViewUsers')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findDetail(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.findDetail(id);
   }
 
   @Patch(':id/role')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  updateRole(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
-    return this.usersService.updateRole(id, dto.role);
+  @RequirePermission('canManageUserRoles')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  updateRole(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
+    // Self-demotion lockout guard: an admin changing their own role away from
+    // the one they hold can strip their own access with no way back in.
+    if (req.user.id === id && dto.roleId !== req.user.roleId) {
+      throw new BadRequestException('You cannot change your own role.');
+    }
+    return this.usersService.updateRole(id, dto.roleId);
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canEditUser')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   updateUser(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateUserDto) {
-    // Don't let an admin demote themselves out of ADMIN — that could lock
-    // everyone out if they're the only admin account.
-    if (req.user.id === id && dto.role && dto.role !== UserRole.ADMIN) {
-      throw new BadRequestException('You cannot change your own role away from Admin.');
-    }
     return this.usersService.updateUser(id, dto);
   }
 
   // Sets the password outright without knowing the old one, and signs the
   // user out everywhere as a side effect (see UsersService.setPassword).
   @Patch(':id/password')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canResetUserPassword')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   setPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: AdminSetPasswordDto) {
     return this.usersService.setPassword(id, dto.newPassword);
   }
@@ -105,8 +104,8 @@ export class UsersController {
   // — no 5-digit code step, unlike the customer-initiated forgot-password
   // flow. The admin never sees the password this way.
   @Post(':id/send-password-reset')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canResetUserPassword')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   sendPasswordReset(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.sendPasswordResetLink(id);
   }
@@ -114,8 +113,8 @@ export class UsersController {
   // Soft delete → Recycle Bin. The safe, reversible action gets the plain
   // DELETE verb; the irreversible one below needs an explicit path segment.
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canDeleteUser')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   softDelete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
     return this.usersService.softDelete(id, req.user.id);
   }
@@ -123,15 +122,15 @@ export class UsersController {
   // Declared before ':id/...' siblings for readability; the distinct path
   // segment means order doesn't actually matter here.
   @Delete(':id/permanent')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canDeleteUser')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   purge(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.purge(id);
   }
 
   @Patch(':id/restore')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canEditUser')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   restore(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.restore(id);
   }
@@ -139,8 +138,8 @@ export class UsersController {
   // "Log out everywhere" — revokes every live refresh token for the user
   // without touching their password.
   @Post(':id/revoke-sessions')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canResetUserPassword')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   async revokeSessions(@Param('id', ParseIntPipe) id: number) {
     await this.usersService.findById(id); // 404s on an unknown id
     const revokedSessions = await this.usersService.revokeAllSessions(id);

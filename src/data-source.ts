@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 
 dotenv.config();
 import {
+  Role,
   Category,
   Function,
   Certification,
@@ -51,6 +52,7 @@ export const AppDataSource = new DataSource({
   synchronize: false,
   logging: ['error', 'warn'],
   entities: [
+    Role,
     Category,
     Function,
     Certification,

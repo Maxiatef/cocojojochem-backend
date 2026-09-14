@@ -17,7 +17,9 @@ export interface BufferedChange {
 export interface AuditActor {
   id: number;
   email: string;
-  role: string;
+  roleId: number | null;
+  /** Snapshot of the role's name at the time of the action. */
+  roleName: string | null;
 }
 
 /**

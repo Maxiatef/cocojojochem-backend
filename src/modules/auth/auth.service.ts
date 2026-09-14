@@ -25,7 +25,6 @@ import {
   AccountStatus,
   RefreshToken,
   PasswordResetRequest,
-  UserRole,
   UserStatus,
   AuditAction,
   AuditActorType,
@@ -88,12 +87,12 @@ export class AuthService {
       passwordHash,
       fullName: dto.fullName,
       phone: dto.phone,
-      role: UserRole.CUSTOMER,
+      roleId: null,
       companyId,
     });
 
-    this.logger.log(`New user registered: ${user.email} (id=${user.id}, role=${user.role})`);
-    return this.buildToken(user.id, user.email, user.role);
+    this.logger.log(`New user registered: ${user.email} (id=${user.id})`);
+    return this.buildToken(user.id, user.email, user.roleId);
   }
 
   /**
@@ -107,23 +106,20 @@ export class AuthService {
    */
   private async auditAuth(
     action: AuditAction,
-    user: { id: number; email: string; role: string } | null,
+    user: { id: number; email: string; roleId: number | null } | null,
     attemptedEmail: string,
     summary: string,
   ): Promise<void> {
-    const role = user?.role;
-    const isStaff = role === UserRole.ADMIN || role === UserRole.SALES;
+    const isStaff = user?.roleId !== null && user?.roleId !== undefined;
 
-    // A failed attempt is worth recording whoever it was aimed at — repeated
-    // failures against an admin address are exactly what this log is for.
     if (!isStaff && action !== AuditAction.LOGIN_FAILED) return;
 
     await this.auditLog.record({
       action,
-      actorType: role === UserRole.SALES ? AuditActorType.SALES : AuditActorType.ADMIN,
+      actorType: isStaff ? AuditActorType.ADMIN : AuditActorType.SYSTEM,
       actorId: user?.id ?? null,
       actorEmail: user?.email ?? attemptedEmail,
-      actorRole: role ?? null,
+      actorRole: user?.roleId ? String(user.roleId) : null,
       entityName: 'User',
       entityId: user ? String(user.id) : 'unknown',
       entityLabel: user?.email ?? attemptedEmail,
@@ -172,10 +168,10 @@ export class AuthService {
     }
 
     this.logger.log(
-      `User logged in: ${user.email} (id=${user.id}, role=${user.role})`,
+      `User logged in: ${user.email} (id=${user.id})`,
     );
     await this.auditAuth(AuditAction.LOGIN, user, dto.email, `${user.email} signed in`);
-    return this.buildToken(user.id, user.email, user.role);
+    return this.buildToken(user.id, user.email, user.roleId);
   }
 
   async changePassword(userId: number, dto: ChangePasswordDto) {
@@ -375,7 +371,7 @@ export class AuthService {
     existing.revokedAt = new Date();
     await this.refreshTokenRepo.save(existing);
 
-    return this.buildToken(user.id, user.email, user.role);
+    return this.buildToken(user.id, user.email, user.roleId);
   }
 
   // The refresh token itself is the credential (no JWT guard needed).
@@ -409,9 +405,9 @@ export class AuthService {
     return hashToken(rawToken);
   }
 
-  private async buildToken(sub: number, email: string, role: string) {
+  private async buildToken(sub: number, email: string, roleId: number | null) {
     const accessToken = this.jwtService.sign(
-      { sub, email, role },
+      { sub, email, roleId },
       { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },
     );
 

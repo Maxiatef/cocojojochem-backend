@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
+  Role,
   Category,
   Function,
   Certification,
@@ -42,6 +43,7 @@ import {
   WishlistItem,
 } from './entities';
 
+import { RolesModule } from './modules/roles/roles.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FunctionsModule } from './modules/functions/functions.module';
 import { CertificationsModule } from './modules/certifications/certifications.module';
@@ -99,6 +101,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'cocojojochem',
       entities: [
+        Role,
         Category,
         Function,
         Certification,
@@ -140,6 +143,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       synchronize: false,
       logging: ['error', 'warn'],
     }),
+    RolesModule,
     CategoriesModule,
     FunctionsModule,
     CertificationsModule,

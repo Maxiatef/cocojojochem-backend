@@ -1,3 +1,4 @@
+export * from './Role';
 export * from './Category';
 export * from './Function';
 export * from './Certification';

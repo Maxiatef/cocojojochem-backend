@@ -1,3 +1,4 @@
+import { RequestStatus } from '../../entities';
 import {
   Body,
   Controller,
@@ -11,10 +12,9 @@ import {
 } from '@nestjs/common';
 import { IsEnum } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequestStatus, UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { QuoteRequestsService } from './quote-requests.service';
 import { CreateQuoteRequestDto } from './dto/create-quote-request.dto';
 
@@ -35,33 +35,33 @@ export class QuoteRequestsController {
   }
 
   @Get()
+  @RequirePermission('canViewQuoteRequests')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAll(@Query('status') status?: RequestStatus) {
     return this.quoteRequestsService.findAll(status);
   }
 
   @Get('stats')
+  @RequirePermission('canViewQuoteRequests')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getStats() {
     return this.quoteRequestsService.getStats();
   }
 
   @Get(':id')
+  @RequirePermission('canViewQuoteRequests')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.quoteRequestsService.findOne(id);
   }
 
   @Patch(':id/status')
+  @RequirePermission('canEditQuoteRequest')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStatusDto) {
     return this.quoteRequestsService.updateStatus(id, dto.status);
   }

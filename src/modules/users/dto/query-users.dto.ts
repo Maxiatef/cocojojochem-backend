@@ -11,10 +11,15 @@ export class QueryUsersDto {
   @IsString()
   search?: string;
 
-  // Comma-separated roles, e.g. "ADMIN,SALES"
+  // Comma-separated role ids, e.g. "1,2", plus two sentinels:
+  //   "none"  — users with no role at all, i.e. customers
+  //   "staff" — users holding any role, whichever roles happen to exist
+  // The "staff" sentinel exists so the admin Staff filter doesn't have to
+  // enumerate role ids client-side, which silently broke whenever the roles
+  // list failed to load.
   @IsOptional()
   @IsString()
-  role?: string;
+  roleId?: string;
 
   // Comma-separated statuses, e.g. "DELETED" for the admin Recycle Bin.
   // Omitted means ACTIVE only — see UsersService.applyUserFilters.

@@ -1,6 +1,8 @@
+import { OrderStatus } from '../../entities';
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   ParseIntPipe,
@@ -13,11 +15,10 @@ import {
 import { IsEnum } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { OrderStatus, UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { OrdersService } from './orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateTrackingDto } from './dto/update-tracking.dto';
@@ -38,8 +39,8 @@ export class OrdersController {
 
   // Admin/sales: all orders across every customer, joined to user + company
   @Get('admin')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewOrders')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAllAdmin(
     @Query('status') status?: OrderStatus,
     @Query('page') page = '1',
@@ -50,8 +51,8 @@ export class OrdersController {
 
   // Declared before ':id' — 'admin' as a numeric id would 400 on ParseIntPipe.
   @Get('admin/stats')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewOrders')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getAdminStats() {
     return this.ordersService.getAdminStats();
   }
@@ -61,8 +62,8 @@ export class OrdersController {
   // rate tables those zones are priced from are admin-editable and served
   // by GET /admin/shipping-rate-tiers?kind=WEIGHT|DRUM instead.
   @Get('admin/shipping-reference')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewOrders')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getShippingReference() {
     const zones = Array.from({ length: 8 }, (_, i) => i + 1).map((zone) => ({
       zone,
@@ -75,24 +76,37 @@ export class OrdersController {
     return { zones };
   }
 
+  // Cancelling is a different act from advancing an order through its normal
+  // lifecycle — it's the one status change that loses a sale and can't be
+  // undone from the admin — so it has its own permission. Both live on this
+  // one route because the frontend cancels by setting the status, so the check
+  // is made here rather than with a static @RequirePermission.
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
-  updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateOrderStatusDto) {
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  updateStatus(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderStatusDto,
+  ) {
+    const required =
+      dto.status === OrderStatus.CANCELLED ? 'canCancelOrder' : 'canEditOrderStatus';
+    if (req.user?.permissions?.[required] !== true) {
+      throw new ForbiddenException(`Missing permission: ${required}`);
+    }
     return this.ordersService.updateStatus(id, dto.status);
   }
 
   @Patch(':id/tracking')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canEditOrderTracking')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   updateTracking(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTrackingDto) {
     return this.ordersService.updateTracking(id, dto);
   }
 
   // Admin/sales: live tracking lookup for any order, no ownership check.
   @Get(':id/tracking/admin')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewOrders')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getTrackingAdmin(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.getTrackingCheckpoints(id);
   }

@@ -1,11 +1,11 @@
+import { ContactMessageStatus } from '../../entities';
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { ContactMessageStatus, UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { ContactMessagesService } from './contact-messages.service';
 import { CreateContactMessageDto } from './dto/create-contact-message.dto';
 
@@ -34,49 +34,49 @@ export class ContactMessagesController {
   }
 
   @Get()
+  @RequirePermission('canViewContactMessages')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAll(@Query('status') status?: ContactMessageStatus) {
     return this.contactMessagesService.findAll(status);
   }
 
   @Get('stats')
+  @RequirePermission('canViewContactMessages')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getStats() {
     return this.contactMessagesService.getStats();
   }
 
   @Get(':id')
+  @RequirePermission('canViewContactMessages')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.contactMessagesService.findOne(id);
   }
 
   @Patch(':id/status')
+  @RequirePermission('canEditContactMessage')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateContactMessageStatusDto) {
     return this.contactMessagesService.updateStatus(id, dto.status);
   }
 
   @Patch(':id/replied')
+  @RequirePermission('canEditContactMessage')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   setReplied(@Param('id', ParseIntPipe) id: number, @Body() dto: SetRepliedDto) {
     return this.contactMessagesService.setReplied(id, dto.replied ?? true);
   }
 
   @Delete(':id')
+  @RequirePermission('canDeleteContactMessage')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.contactMessagesService.remove(id);
   }

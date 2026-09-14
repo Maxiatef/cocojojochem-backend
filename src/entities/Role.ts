@@ -1,0 +1,26 @@
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, CreateDateColumn } from 'typeorm';
+import { User } from './User';
+
+@Entity('roles')
+export class Role {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ unique: true })
+  name: string;
+
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
+  @Column({ type: 'jsonb', default: '{}' })
+  permissions: Record<string, boolean>;
+
+  @Column({ default: false })
+  isSystem: boolean;
+
+  @OneToMany(() => User, (user) => user.role)
+  users: User[];
+
+  @CreateDateColumn()
+  createdAt: Date;
+}

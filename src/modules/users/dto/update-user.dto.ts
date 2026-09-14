@@ -1,9 +1,6 @@
-import { IsEmail, IsEnum, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
-import { UserRole } from '../../../entities';
+import { IsEmail, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class UpdateUserDto {
-  // Still accepted so existing callers keep working. When firstName/lastName
-  // are sent instead, the service recomposes fullName from them.
   @IsOptional()
   @IsString()
   @MinLength(1)
@@ -26,10 +23,9 @@ export class UpdateUserDto {
   phone?: string | null;
 
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsInt()
+  roleId?: number | null;
 
-  // Explicitly nullable — allows unassigning a user from their company.
   @IsOptional()
   companyId?: number | null;
 }

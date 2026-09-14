@@ -41,7 +41,14 @@ export class AuditInterceptor implements NestInterceptor {
       requestId: randomUUID(),
       startedAt: Date.now(),
       occurredAt: new Date(),
-      actor: req.user ? { id: req.user.id, email: req.user.email, role: req.user.role } : null,
+      actor: req.user
+        ? {
+            id: req.user.id,
+            email: req.user.email,
+            roleId: req.user.roleId ?? null,
+            roleName: req.user.roleName ?? null,
+          }
+        : null,
       // Webhooks carry no user but do change real data, so they are attributed
       // to their source rather than dropped — otherwise an order would change
       // status with nobody appearing to have touched it.

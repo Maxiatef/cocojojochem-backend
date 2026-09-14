@@ -12,10 +12,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { CouponsService } from './coupons.service';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { UpdateCouponDto } from './dto/update-coupon.dto';
@@ -40,81 +39,81 @@ export class CouponsController {
   // deleting coupons stays ADMIN-only further down: a coupon is a direct
   // discount on revenue.
   @Get()
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAll(@Query() query: QueryCouponsDto) {
     return this.couponsService.findAll(query);
   }
 
   @Get('analytics/all')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getAnalyticsAll() {
     return this.couponsService.getAnalyticsAll();
   }
 
   @Get('helpers/search-products')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   searchProducts(@Query('q') q?: string) {
     return this.couponsService.searchProducts(q || '');
   }
 
   @Get('helpers/search-categories')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   searchCategories(@Query('q') q?: string) {
     return this.couponsService.searchCategories(q || '');
   }
 
   @Get('helpers/search-variants')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   searchVariants(@Query('q') q?: string) {
     return this.couponsService.searchVariants(q || '');
   }
 
   @Get('analytics/:id')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getAnalyticsForCoupon(@Param('id', ParseIntPipe) id: number) {
     return this.couponsService.getAnalyticsForCoupon(id);
   }
 
   @Get(':id')
+  @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.couponsService.findOne(id);
   }
 
   @Post()
+  @RequirePermission('canCreateCoupon')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   create(@Body() dto: CreateCouponDto) {
     return this.couponsService.create(dto);
   }
 
   @Patch(':id')
+  @RequirePermission('canEditCoupon')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCouponDto) {
     return this.couponsService.update(id, dto);
   }
 
   @Delete(':id')
+  @RequirePermission('canDeleteCoupon')
   @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.couponsService.remove(id);
   }

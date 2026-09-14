@@ -12,12 +12,7 @@ import { Company } from './Company';
 import { QuoteRequest } from './QuoteRequest';
 import { Cart } from './Cart';
 import { Order } from './Order';
-
-export enum UserRole {
-  CUSTOMER = 'CUSTOMER',
-  ADMIN = 'ADMIN',
-  SALES = 'SALES',
-}
+import { Role } from './Role';
 
 // Soft-delete state. DELETED accounts can't log in and appear in the admin
 // Recycle Bin, from where they're either restored or permanently deleted.
@@ -60,8 +55,12 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   phone: string | null;
 
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.CUSTOMER })
-  role: UserRole;
+  @Column({ type: 'int', nullable: true })
+  roleId: number | null;
+
+  @ManyToOne(() => Role, (role) => role.users, { nullable: true })
+  @JoinColumn({ name: 'roleId' })
+  role: Role | null;
 
   // The single authoritative gate for whether this account may be used.
   // Checked in JwtStrategy (every request), login, refresh, and the

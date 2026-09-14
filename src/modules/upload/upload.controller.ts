@@ -9,10 +9,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ALLOWED_DOCUMENT_TYPES, MAX_DOCUMENT_SIZE, UploadService } from './upload.service';
 import { UPLOAD_SUBFOLDER_BY_ROUTE } from './upload-subfolders';
@@ -30,8 +29,7 @@ import { extname, join } from 'path';
 // The folder is now derived from the route and never from the request body.
 // ADMIN + SALES: uploads back the product/category editors, and sales may
 // attach imagery when preparing a listing.
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.SALES)
+@UseGuards(JwtAuthGuard, PermissionGuard)
 @ApiBearerAuth('access-token')
 @Controller('uploads')
 export class UploadController {
@@ -40,6 +38,7 @@ export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
   @Post('product-image')
+  @RequirePermission('canUploadMedia')
   @UseInterceptors(FileInterceptor('file'))
   async uploadProductImage(
     @UploadedFile() file: Express.Multer.File,
@@ -83,6 +82,7 @@ export class UploadController {
   }
 
   @Post('variant-image')
+  @RequirePermission('canUploadMedia')
   @UseInterceptors(FileInterceptor('file'))
   async uploadVariantImage(@UploadedFile() file: Express.Multer.File) {
     try {
@@ -110,6 +110,7 @@ export class UploadController {
   }
 
   @Post('category-image')
+  @RequirePermission('canUploadMedia')
   @UseInterceptors(FileInterceptor('file'))
   async uploadCategoryImage(@UploadedFile() file: Express.Multer.File) {
     try {
@@ -152,6 +153,7 @@ export class UploadController {
    * image rules untouched for every other route.
    */
   @Post('product-document')
+  @RequirePermission('canUploadMedia')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -224,6 +226,7 @@ export class UploadController {
   }
 
   @Post('multiple-images')
+  @RequirePermission('canUploadMedia')
   @UseInterceptors(FilesInterceptor('files', 10))
   async uploadMultipleImages(
     @UploadedFiles() files: Express.Multer.File[],

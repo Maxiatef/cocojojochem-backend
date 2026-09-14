@@ -7,7 +7,7 @@ import { UsersService } from '../users/users.service';
 export interface JwtPayload {
   sub: number;
   email: string;
-  role: string;
+  roleId: number | null;
 }
 
 @Injectable()
@@ -53,8 +53,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('This account is no longer active.');
     }
 
-    // Role comes from the DB, not payload.role — RolesGuard reads
-    // req.user.role, so a role change also applies immediately.
-    return { id: user.id, email: user.email, role: user.role };
+    // Role and permissions come from the DB, not the payload — so editing a
+    // role's permissions applies on the next request rather than when the
+    // 15-minute access token expires.
+    return {
+      id: user.id,
+      email: user.email,
+      roleId: user.roleId,
+      roleName: user.role?.name ?? null,
+      permissions: user.role?.permissions ?? {},
+    };
   }
 }

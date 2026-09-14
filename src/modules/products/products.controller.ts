@@ -11,10 +11,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -62,8 +61,8 @@ export class ProductsController {
   // Staff-readable: returns unpublished/inactive products too, so it must
   // not be public. Sales needs it to look up stock and pricing when quoting.
   @Get('admin')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewProducts')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findAllAdmin(
     @Query('page') page = '1',
     @Query('limit') limit = '20',
@@ -90,8 +89,8 @@ export class ProductsController {
 
   // Backs the clickable status cards atop the admin Products page.
   @Get('admin/stats')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewProducts')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   getAdminStats() {
     return this.productsService.getAdminStats();
   }
@@ -115,8 +114,8 @@ export class ProductsController {
   // only ever called by the admin product view/editor. Left public it leaked
   // unpublished products and internal fields to anyone who guessed an id.
   @Get('by-id/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SALES)
+  @RequirePermission('canViewProducts')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   findById(@Param('id', ParseIntPipe) id: number) {
     return this.productsService.findById(id);
   }
@@ -134,22 +133,22 @@ export class ProductsController {
   // Catalog writes are ADMIN-only — these were completely unguarded, so any
   // anonymous caller could create/edit/delete products and prices.
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canCreateProduct')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   create(@Body() dto: CreateProductDto) {
     return this.productsService.create(dto);
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canEditProduct')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateProductDto) {
     return this.productsService.update(id, dto);
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('canDeleteProduct')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.productsService.remove(id);
   }

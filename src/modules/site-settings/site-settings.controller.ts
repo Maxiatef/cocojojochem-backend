@@ -1,20 +1,19 @@
 import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { SiteSettingsService } from './site-settings.service';
 
 @ApiTags('Site Settings')
 @ApiBearerAuth('access-token')
 @Controller('site-settings')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class SiteSettingsController {
   constructor(private readonly siteSettingsService: SiteSettingsService) {}
 
   @Get()
+  @RequirePermission('canViewSiteSettings')
   findAll() {
     return this.siteSettingsService.findAll();
   }
@@ -23,6 +22,7 @@ export class SiteSettingsController {
   // configured — never returns the actual key values. Keys themselves stay
   // in .env, not the DB, so there's nothing here for this endpoint to leak.
   @Get('integrations-status')
+  @RequirePermission('canViewSiteSettings')
   getIntegrationsStatus() {
     return {
       stripe: !!process.env.STRIPE_SECRET_KEY,
@@ -34,6 +34,7 @@ export class SiteSettingsController {
   }
 
   @Patch()
+  @RequirePermission('canEditSiteSettings')
   update(@Body() patch: Record<string, string>) {
     return this.siteSettingsService.update(patch);
   }

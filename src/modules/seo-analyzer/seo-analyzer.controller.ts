@@ -1,21 +1,20 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { UserRole } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { SeoAnalyzerService } from './seo-analyzer.service';
 import { AnalyzeProductSeoDto } from './dto/analyze-product-seo.dto';
 
 @ApiTags('SEO Analyzer')
 @Controller('seo-analyzer')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class SeoAnalyzerController {
   constructor(private readonly seoAnalyzerService: SeoAnalyzerService) {}
 
   @Post('analyze')
+  @RequirePermission('canRunSeoAnalyzer')
   analyze() {
     return this.seoAnalyzerService.analyzeAll();
   }
@@ -25,6 +24,7 @@ export class SeoAnalyzerController {
    * editor can call it while the admin types and before anything is saved.
    */
   @Post('product')
+  @RequirePermission('canRunSeoAnalyzer')
   analyzeProduct(@Body() body: AnalyzeProductSeoDto) {
     return this.seoAnalyzerService.analyzeProduct(body);
   }

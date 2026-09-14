@@ -1,5 +1,4 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
-import { UserRole } from '../../../entities';
+import { IsEmail, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateStaffUserDto {
   @IsString()
@@ -16,6 +15,6 @@ export class CreateStaffUserDto {
   @MinLength(8)
   password: string;
 
-  @IsEnum(UserRole)
-  role: UserRole.ADMIN | UserRole.SALES;
+  @IsInt()
+  roleId: number;
 }

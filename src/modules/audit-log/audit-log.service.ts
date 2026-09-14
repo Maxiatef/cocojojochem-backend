@@ -8,7 +8,6 @@ import {
   AuditChildChange,
   AuditFieldChange,
   AuditLog,
-  UserRole,
 } from '../../entities';
 import { AuditStore, BufferedChange } from '../../common/audit/audit.types';
 import {
@@ -238,14 +237,14 @@ export class AuditLogService {
     // and an empty result is a perfectly good answer to it. Customers are
     // excluded because their activity is out of scope for this log entirely.
     const staff = await this.repo.query(
-      `SELECT u.id, u.email, u.role::text AS role, u.status::text AS status
+      `SELECT u.id, u.email, r.name AS role, u.status::text AS status
          FROM users u
-        WHERE u.role <> 'CUSTOMER'
+         JOIN roles r ON r.id = u."roleId"
         ORDER BY u.email ASC`,
     );
 
     // Plus anyone already in the log who isn't in that list any more: an
-    // account since demoted to CUSTOMER, or hard-deleted. Their entries are
+    // account since stripped of its role, or hard-deleted. Their entries are
     // still here, so they must stay filterable — otherwise a departed admin's
     // trail becomes unreachable, which is the opposite of the point.
     const pastActors = await this.repo.query(
@@ -293,9 +292,12 @@ export class AuditLogService {
    */
   private actorTypeOf(store: AuditStore): AuditActorType | null {
     if (store.actor) {
-      if (store.actor.role === UserRole.ADMIN) return AuditActorType.ADMIN;
-      if (store.actor.role === UserRole.SALES) return AuditActorType.SALES;
-      return null;
+      // Any user holding a role is staff and is audited. Roles are dynamic
+      // now, so this must not be a list of known ids — a custom role's writes
+      // would silently go unrecorded, which is exactly what the log exists to
+      // prevent. Customers hold no role and are dropped here as before.
+      if (store.actor.roleId == null) return null;
+      return store.actor.roleName === 'Sales' ? AuditActorType.SALES : AuditActorType.ADMIN;
     }
     return store.actorSource ? AuditActorType.SYSTEM : null;
   }
@@ -336,7 +338,7 @@ export class AuditLogService {
       actorType,
       actorId: store.actor?.id ?? null,
       actorEmail: store.actor?.email ?? null,
-      actorRole: store.actor?.role ?? null,
+      actorRole: store.actor?.roleName ?? null,
       actorSource: store.actorSource,
       truncated: store.truncated,
       httpMethod: store.http.method,

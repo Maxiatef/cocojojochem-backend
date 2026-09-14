@@ -1,7 +1,6 @@
-import { IsEnum } from 'class-validator';
-import { UserRole } from '../../../entities';
+import { IsInt } from 'class-validator';
 
 export class UpdateRoleDto {
-  @IsEnum(UserRole)
-  role: UserRole;
+  @IsInt()
+  roleId: number;
 }

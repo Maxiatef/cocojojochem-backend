@@ -17,7 +17,6 @@ import {
   QuoteRequest,
   RefreshToken,
   User,
-  UserRole,
   UserStatus,
   AuditAction,
   AuditActorType,
@@ -58,32 +57,66 @@ export class UsersService {
   }
 
   // Backs the clickable stat cards atop the admin Users page.
-  // The four role counts are scoped to ACTIVE so they keep summing to Total —
-  // recycled users are counted separately by the Recycle Bin tile instead.
+  // Counts are scoped to ACTIVE so they keep summing to Total — recycled users
+  // are counted separately by the Recycle Bin tile instead.
+  //
+  // Roles are dynamic, so the per-role breakdown is grouped by whatever roles
+  // actually exist rather than by fixed ids. `staff` is everyone holding any
+  // role at all, which is what makes customers + staff = total hold even after
+  // an admin invents a new role.
   async getStats() {
-    const [total, customers, sales, admins, deleted] = await Promise.all([
+    const [total, deleted, byRole] = await Promise.all([
       this.usersRepo.count({ where: { status: UserStatus.ACTIVE } }),
-      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.CUSTOMER } }),
-      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.SALES } }),
-      this.usersRepo.count({ where: { status: UserStatus.ACTIVE, role: UserRole.ADMIN } }),
       this.usersRepo.count({ where: { status: UserStatus.DELETED } }),
+      this.usersRepo
+        .createQueryBuilder('user')
+        .select('role.name', 'name')
+        .addSelect('COUNT(*)', 'count')
+        .innerJoin('user.role', 'role')
+        .where('user.status = :status', { status: UserStatus.ACTIVE })
+        .groupBy('role.name')
+        .getRawMany<{ name: string; count: string }>(),
     ]);
-    return { total, customers, sales, admins, deleted };
+
+    const roleCounts: Record<string, number> = {};
+    let staff = 0;
+    for (const row of byRole) {
+      const n = Number(row.count);
+      roleCounts[row.name] = n;
+      staff += n;
+    }
+
+    return {
+      total,
+      customers: total - staff,
+      staff,
+      // Kept for the existing stat cards; both are just entries in roleCounts.
+      sales: roleCounts['Sales'] ?? 0,
+      admins: roleCounts['Admin'] ?? 0,
+      roleCounts,
+      deleted,
+    };
   }
 
   // Narrow per-request lookup for JwtStrategy. Deliberately not findById():
   // that joins `company` and throws NotFoundException (a 404, not a 401).
-  // This runs on EVERY authenticated request, so it selects four scalar
-  // columns off the primary key and nothing else.
+  // This runs on EVERY authenticated request, so it selects the few scalar
+  // columns off the primary key plus the role row, and nothing else.
+  //
+  // The role is joined rather than left to PermissionGuard because the guard
+  // would otherwise issue a second query per request. Reading it here also
+  // keeps the existing property that a role or permission change takes effect
+  // on the very next request instead of when the access token expires.
   authLookup(id: number) {
     return this.usersRepo.findOne({
       where: { id },
-      select: ['id', 'email', 'role', 'status'],
+      select: ['id', 'email', 'roleId', 'status'],
+      relations: ['role'],
     });
   }
 
   async findById(id: number) {
-    const user = await this.usersRepo.findOne({ where: { id }, relations: ['company'] });
+    const user = await this.usersRepo.findOne({ where: { id }, relations: ['company', 'role'] });
     if (!user) throw new NotFoundException(`User #${id} not found`);
     return user;
   }
@@ -113,9 +146,20 @@ export class UsersService {
         search: `%${query.search}%`,
       });
     }
-    if (query.role) {
-      const roles = query.role.split(',').map((r) => r.trim().toUpperCase());
-      qb.andWhere('user.role IN (:...roles)', { roles });
+    if (query.roleId) {
+      const parts = query.roleId.split(',').map((r) => r.trim()).filter(Boolean);
+      const wantsNone = parts.includes('none');
+      const wantsStaff = parts.includes('staff');
+      const ids = parts.filter((p) => /^\d+$/.test(p)).map(Number);
+      if (wantsStaff && !wantsNone) {
+        qb.andWhere('user.roleId IS NOT NULL');
+      } else if (wantsNone && ids.length) {
+        qb.andWhere('(user.roleId IN (:...roleIds) OR user.roleId IS NULL)', { roleIds: ids });
+      } else if (wantsNone) {
+        qb.andWhere('user.roleId IS NULL');
+      } else if (ids.length) {
+        qb.andWhere('user.roleId IN (:...roleIds)', { roleIds: ids });
+      }
     }
     // Recycled users are hidden unless explicitly asked for, so the Recycle
     // Bin never leaks into the normal list — and any other caller that lists
@@ -136,11 +180,13 @@ export class UsersService {
     const qb = this.usersRepo
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.company', 'company')
+      .leftJoinAndSelect('user.role', 'role')
       .leftJoin('user.orders', 'orders')
       .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
       .addSelect('COALESCE(SUM(orders.total), 0)', 'totalSpent')
       .groupBy('user.id')
       .addGroupBy('company.id')
+      .addGroupBy('role.id')
       .orderBy('user.createdAt', 'DESC');
 
     this.applyUserFilters(qb, query);
@@ -212,7 +258,7 @@ export class UsersService {
     if (dto.firstName !== undefined) user.firstName = dto.firstName || null;
     if (dto.lastName !== undefined) user.lastName = dto.lastName || null;
     if (dto.phone !== undefined) user.phone = dto.phone;
-    if (dto.role !== undefined) user.role = dto.role;
+    if (dto.roleId !== undefined) user.roleId = dto.roleId;
     if (dto.companyId !== undefined) user.companyId = dto.companyId;
 
     // Recompose the canonical display name from the parts the admin edited.
@@ -250,12 +296,14 @@ export class UsersService {
 
   // --- Soft delete / restore / permanent delete ------------------------------
 
-  // Admin accounts are never deletable through the UI: to offboard an admin,
-  // change their role first. Shared by softDelete and purge.
+  // Admin-equivalent accounts are never deletable through the UI: to offboard
+  // one, change their role first. Now that roles are dynamic, "admin" means
+  // "holds a role that can itself delete users" rather than a fixed enum value,
+  // so a custom role with that power is protected too.
   private assertDeletable(user: User, actingAdminId?: number) {
-    if (user.role === UserRole.ADMIN) {
+    if (user.role?.permissions?.canDeleteUser === true) {
       throw new ForbiddenException(
-        'Admin accounts cannot be deleted. Change the role to Sales or Customer first.',
+        'Accounts that can manage users cannot be deleted. Change the role first.',
       );
     }
     // Unreachable while the role check above stands, but kept so the
@@ -397,7 +445,7 @@ export class UsersService {
         actorType: AuditActorType.ADMIN,
         actorId: userId,
         actorEmail: user?.email ?? null,
-        actorRole: user?.role ?? null,
+        actorRole: user?.roleId ? String(user.roleId) : null,
         entityName: 'User',
         entityId: String(userId),
         entityLabel: user?.email ?? null,
@@ -465,9 +513,9 @@ export class UsersService {
     return { success: true, email: user.email, emailSent };
   }
 
-  async updateRole(id: number, role: UserRole) {
+  async updateRole(id: number, roleId: number | null) {
     const user = await this.findById(id);
-    user.role = role;
+    user.roleId = roleId;
     const { passwordHash, ...safeUser } = await this.usersRepo.save(user);
     return safeUser;
   }
@@ -482,7 +530,7 @@ export class UsersService {
       passwordHash,
       fullName: dto.fullName,
       phone: dto.phone,
-      role: dto.role,
+      roleId: dto.roleId,
     });
     // Renamed on destructure — `passwordHash` is already bound above in this
     // scope as the value we just hashed.
