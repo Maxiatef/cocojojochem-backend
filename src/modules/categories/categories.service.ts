@@ -23,7 +23,7 @@ export class CategoriesService {
   ) {}
 
   // Mirrors the live cocojojo.com shape: each category carries its own live product count.
-  async findAll(page = 1, limit = 50, search?: string, sort?: string) {
+  async findAll(page = 1, limit = 50, search?: string, sort?: string, rootsOnly = false) {
     const qb = this.categoriesRepo
       .createQueryBuilder('category')
       // The admin list shows which parent a subcategory sits under, and a
@@ -35,6 +35,13 @@ export class CategoriesService {
 
     if (search) {
       qb.andWhere('category.name ILIKE :search', { search: `%${search}%` });
+    }
+
+    // Surfaces that present categories as a flat set of peers — the catalogue
+    // index, the homepage grid, the filter chips — must not mix parents and
+    // their own children into one list.
+    if (rootsOnly) {
+      qb.andWhere('category.parentId IS NULL');
     }
 
     if (sort === 'products_desc' || sort === 'products_asc') {
@@ -76,6 +83,8 @@ export class CategoriesService {
     const category = await this.categoriesRepo
       .createQueryBuilder('category')
       .leftJoinAndSelect('category.children', 'children')
+      // The storefront breadcrumb on a subcategory names the branch above it.
+      .leftJoinAndSelect('category.parent', 'parent')
       .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
         qb.andWhere('product.isPublished = true'),
       )

@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Product, ProductImage, ProductVariant, ProductSpec, ProductSeo, ProductDocument } from '../../entities';
+import {
+  Category,
+  Product,
+  ProductImage,
+  ProductVariant,
+  ProductSpec,
+  ProductSeo,
+  ProductDocument,
+} from '../../entities';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { SeoAnalyzerModule } from '../seo-analyzer/seo-analyzer.module';
@@ -14,6 +22,9 @@ import { SeoAnalyzerModule } from '../seo-analyzer/seo-analyzer.module';
       ProductSpec,
       ProductSeo,
       ProductDocument,
+      // Read-only here: used to expand a parent category into its children
+      // when filtering products.
+      Category,
     ]),
     // For the per-product SEO score refreshed on every save.
     SeoAnalyzerModule,

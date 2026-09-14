@@ -30,8 +30,15 @@ export class CategoriesController {
     @Query('limit') limit = '50',
     @Query('search') search?: string,
     @Query('sort') sort?: string,
+    @Query('rootsOnly') rootsOnly?: string,
   ) {
-    return this.categoriesService.findAll(Number(page), Number(limit), search, sort);
+    return this.categoriesService.findAll(
+      Number(page),
+      Number(limit),
+      search,
+      sort,
+      rootsOnly === 'true',
+    );
   }
 
   // Nested parent/children tree for menus/sidebars

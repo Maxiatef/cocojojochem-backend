@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import {
+  Category,
   Product,
   ProductImage,
   ProductVariant,
@@ -69,13 +70,35 @@ export class ProductsService {
     private readonly documentsRepo: Repository<ProductDocument>,
     @InjectRepository(ProductSeo)
     private readonly seoRepo: Repository<ProductSeo>,
+    @InjectRepository(Category)
+    private readonly categoriesRepo: Repository<Category>,
     private readonly seoAnalyzer: SeoAnalyzerService,
   ) {}
+
+  /**
+   * Expands a category id into itself plus its direct children.
+   *
+   * Products attach to the most specific category they belong to, so a
+   * product in "Carrier Oils" is not literally in "Oils" — but someone
+   * filtering by Oils means everything underneath it. Categories nest exactly
+   * one level (enforced in CategoriesService), so one lookup is the whole
+   * subtree; there is no recursion to do.
+   */
+  private async categoryIdsFor(categoryId: number): Promise<number[]> {
+    const children = await this.categoriesRepo.find({
+      where: { parentId: categoryId },
+      select: ['id'],
+    });
+    return [categoryId, ...children.map((c) => c.id)];
+  }
 
   private baseQuery() {
     return this.productsRepo
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
+      // The category's own parent, so a product can be shown as
+      // "Oils › Carrier Oils" without a second lookup.
+      .leftJoinAndSelect('category.parent', 'categoryParent')
       .leftJoinAndSelect('product.variants', 'variants')
       .leftJoinAndSelect('product.functions', 'functions')
       .leftJoinAndSelect('product.certifications', 'certifications')
@@ -127,7 +150,9 @@ export class ProductsService {
     const qb = this.applyPublicVisibility(this.baseQuery());
 
     if (query.categoryId) {
-      qb.andWhere('product.categoryId = :categoryId', { categoryId: query.categoryId });
+      qb.andWhere('product.categoryId IN (:...categoryIds)', {
+        categoryIds: await this.categoryIdsFor(query.categoryId),
+      });
     }
     if (query.functionSlug) {
       qb.andWhere('functions.slug = :functionSlug', { functionSlug: query.functionSlug });
@@ -236,7 +261,9 @@ export class ProductsService {
       );
     }
     if (categoryId) {
-      qb.andWhere('product.categoryId = :categoryId', { categoryId });
+      qb.andWhere('product.categoryId IN (:...categoryIds)', {
+        categoryIds: await this.categoryIdsFor(categoryId),
+      });
     }
     if (functionSlug) {
       qb.andWhere('functions.slug = :functionSlug', { functionSlug });
