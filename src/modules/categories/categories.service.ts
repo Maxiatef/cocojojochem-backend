@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { Category, Product } from '../../entities';
@@ -20,6 +26,9 @@ export class CategoriesService {
   async findAll(page = 1, limit = 50, search?: string, sort?: string) {
     const qb = this.categoriesRepo
       .createQueryBuilder('category')
+      // The admin list shows which parent a subcategory sits under, and a
+      // bare `parentId` would mean a second lookup per row to name it.
+      .leftJoinAndSelect('category.parent', 'parent')
       .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
         qb.andWhere('product.isPublished = true'),
       );
@@ -119,7 +128,50 @@ export class CategoriesService {
     return { ...category, products };
   }
 
+  /**
+   * Validates a proposed parent before it is saved.
+   *
+   * The catalogue is deliberately two levels deep: `findTree` returns roots
+   * with their children, and `findProducts` rolls up a category plus its
+   * direct children only. A grandchild would be invisible in both — it would
+   * not appear in any menu, and its products would not count towards its
+   * grandparent. So a parent must itself be a root.
+   *
+   * That rule also makes cycles impossible without walking the chain: a
+   * category can only point at a root, and a root points at nothing.
+   */
+  private async assertValidParent(parentId: number | null | undefined, selfId?: number) {
+    if (parentId === null || parentId === undefined) return;
+
+    if (selfId !== undefined && parentId === selfId) {
+      throw new BadRequestException('A category cannot be its own parent.');
+    }
+
+    const parent = await this.categoriesRepo.findOne({ where: { id: parentId } });
+    if (!parent) {
+      throw new BadRequestException(`Parent category #${parentId} not found.`);
+    }
+
+    if (parent.parentId !== null) {
+      throw new BadRequestException(
+        `"${parent.name}" is already a subcategory. Categories can only be nested one level deep.`,
+      );
+    }
+
+    // Moving a category under a root is fine unless that category is itself a
+    // parent — that would push its own children to a third level.
+    if (selfId !== undefined) {
+      const childCount = await this.categoriesRepo.count({ where: { parentId: selfId } });
+      if (childCount > 0) {
+        throw new BadRequestException(
+          'This category has subcategories of its own, so it cannot become a subcategory. Move or delete its subcategories first.',
+        );
+      }
+    }
+  }
+
   async create(dto: CreateCategoryDto) {
+    await this.assertValidParent(dto.parentId);
     const category = this.categoriesRepo.create(dto);
     const saved = await this.categoriesRepo.save(category);
     this.logger.log(`Category created: "${saved.name}" (id=${saved.id})`);
@@ -127,6 +179,7 @@ export class CategoriesService {
   }
 
   async update(id: number, dto: UpdateCategoryDto) {
+    if ('parentId' in dto) await this.assertValidParent(dto.parentId, id);
     const category = await this.categoriesRepo.preload({ id, ...dto });
     if (!category) throw new NotFoundException(`Category #${id} not found`);
     const saved = await this.categoriesRepo.save(category);
@@ -137,6 +190,16 @@ export class CategoriesService {
   async remove(id: number) {
     const category = await this.categoriesRepo.findOne({ where: { id } });
     if (!category) throw new NotFoundException(`Category #${id} not found`);
+
+    // The parentId foreign key is ON DELETE NO ACTION, so deleting a parent
+    // that still has children fails in Postgres and surfaces as a raw 500.
+    // Say what is actually wrong instead.
+    const children = await this.categoriesRepo.count({ where: { parentId: id } });
+    if (children > 0) {
+      throw new ConflictException(
+        `"${category.name}" has ${children} subcategor${children === 1 ? 'y' : 'ies'}. Move or delete ${children === 1 ? 'it' : 'them'} first.`,
+      );
+    }
     this.logger.log(`Category deleted: "${category.name}" (id=${category.id})`);
     return this.categoriesRepo.remove(category);
   }
