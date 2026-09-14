@@ -39,6 +39,7 @@ import {
   QuoteListItem,
   PendingCheckout,
   AuditLog,
+  WishlistItem,
 } from './entities';
 
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -50,6 +51,7 @@ import { CompaniesModule } from './modules/companies/companies.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CartModule } from './modules/cart/cart.module';
 import { QuoteListModule } from './modules/quote-list/quote-list.module';
+import { WishlistModule } from './modules/wishlist/wishlist.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { QuoteRequestsModule } from './modules/quote-requests/quote-requests.module';
 import { TestimonialsModule } from './modules/testimonials/testimonials.module';
@@ -131,6 +133,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
         QuoteListItem,
   PendingCheckout,
   AuditLog,
+  WishlistItem,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: true,
@@ -146,6 +149,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
     AuthModule,
     CartModule,
     QuoteListModule,
+    WishlistModule,
     OrdersModule,
     QuoteRequestsModule,
     TestimonialsModule,

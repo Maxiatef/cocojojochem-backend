@@ -38,6 +38,7 @@ import {
   QuoteListItem,
   PendingCheckout,
   AuditLog,
+  WishlistItem,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -84,6 +85,7 @@ export const AppDataSource = new DataSource({
     QuoteListItem,
   PendingCheckout,
   AuditLog,
+  WishlistItem,
   ],
   migrations: ['src/migrations/*.ts'],
 });

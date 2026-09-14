@@ -97,6 +97,19 @@ export class ProductsController {
   }
 
   // Admin lookup by numeric id — declared before ':slug' so "by-id" isn't
+  // A guest's wishlist is a list of product ids in their browser, so it needs
+  // to resolve several products in one call. Public visibility rules apply —
+  // this returns only what the catalogue already shows anyone.
+  @Get('by-ids')
+  findByIds(@Query('ids') ids?: string) {
+    return this.productsService.findPublicByIds(
+      (ids || '')
+        .split(',')
+        .map((raw) => Number(raw.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0),
+    );
+  }
+
   // swallowed as a slug value.
   // Staff-only: returns the full record regardless of publish state, and is
   // only ever called by the admin product view/editor. Left public it leaked

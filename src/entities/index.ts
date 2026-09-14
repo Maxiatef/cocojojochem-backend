@@ -32,3 +32,5 @@ export * from './ShippingRateTier';
 export * from './QuoteListItem';
 export * from './PendingCheckout';
 export * from './AuditLog';
+export * from './WishlistItem';
+export * from './WishlistItem';

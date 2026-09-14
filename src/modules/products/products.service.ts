@@ -214,6 +214,28 @@ export class ProductsService {
   // Admin lookup by numeric id (the public API only resolves by slug) — used
   // by the admin edit form, which has the id from the list but not the slug's
   // canonical form needed to round-trip safely if the slug itself is edited.
+  /**
+   * Several public products at once, for a guest wishlist holding only ids.
+   *
+   * Capped at 100: the parameter comes from a browser's localStorage, so the
+   * length is not something the server should trust.
+   */
+  async findPublicByIds(ids: number[]) {
+    if (ids.length === 0) return [];
+
+    const products = await this.applyPublicVisibility(this.baseQuery())
+      .andWhere('product.id IN (:...ids)', { ids: ids.slice(0, 100) })
+      .getMany();
+
+    // Returned in the order asked for — the wishlist's own newest-first order,
+    // which SQL has no reason to preserve.
+    const byId = new Map(products.map((p) => [p.id, p]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((p): p is Product => !!p)
+      .map((p) => this.decorate(p));
+  }
+
   async findById(id: number) {
     await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
