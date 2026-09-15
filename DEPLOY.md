@@ -41,21 +41,14 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `DB_HOST` | `bzesax2fxpoue2au2hih-postgresql.services.clever-cloud.com` | |
 | `DB_PORT` | `50013` | Not 5432. |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
-| **`DB_SSL`** | **`true`** | **Clever Cloud refuses plaintext connections.** Without this the API cannot start. |
-| `DB_SSL_REJECT_UNAUTHORIZED` | `false` | Managed providers use self-signed certificates. The connection is still encrypted. |
 | `JWT_SECRET` | a long random string | Must not be the `change-me` default. |
 | `FRONTEND_URL` | the storefront's URL | Used in emails and Stripe redirect URLs. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `SHIPPO_API_KEY` | real keys | |
 
 ## What this branch changes in code
 
-Two changes, both required by any hosted deployment rather than by Vercel
+One change, required by any hosted deployment rather than by Vercel
 specifically:
-
-**`app.module.ts` — Postgres TLS.** The TypeORM config had no `ssl` option, so
-it would have been refused by Clever Cloud on the first connection attempt.
-Now driven by `DB_SSL`, defaulting to off so a local postgres container still
-works.
 
 **CORS stays open (`origin: '*'`)**, deliberately. Auth here is a Bearer token
 in the Authorization header rather than a cookie, so a wildcard origin costs
@@ -70,6 +63,12 @@ convenience and actively harmful on a host: the platform routes traffic to the
 port it assigned, so binding a different one means the health check never
 passes and the deploy is marked failed. Under `NODE_ENV=production` it now
 binds the given port or throws.
+
+**The database connection is plaintext.** There is no `ssl` option in the
+TypeORM config, by choice. Clever Cloud accepts unencrypted connections, so
+this works — but credentials and query data cross the public internet in the
+clear. Adding `ssl: { rejectUnauthorized: false }` to `TypeOrmModule.forRoot`
+is the whole fix if that is ever wanted.
 
 ## Uploads
 
