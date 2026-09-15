@@ -45,8 +45,16 @@ export class UploadService {
     'image/webp',
   ];
 
+  /** False when the upload directories could not be created — see below. */
+  private storageAvailable = true;
+
   constructor() {
     this.ensureUploadDirectoryExists();
+  }
+
+  /** Whether files can actually be written on this deployment. */
+  get isStorageAvailable(): boolean {
+    return this.storageAvailable;
   }
 
   private ensureUploadDirectoryExists() {
@@ -59,12 +67,28 @@ export class UploadService {
       join(this.uploadPath, 'temp'),
     ];
 
-    directories.forEach((dir) => {
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-        this.logger.log(`Created directory: ${dir}`);
-      }
-    });
+    // A throw here would abort the whole Nest bootstrap, taking down every
+    // route in the API over a directory that only the upload endpoints need.
+    // That is what happens on a serverless runtime, where the filesystem is
+    // read-only outside /tmp and mkdir fails with ENOENT/EROFS.
+    //
+    // Recorded instead, so uploads can refuse cleanly while the rest of the
+    // application runs.
+    try {
+      directories.forEach((dir) => {
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+          this.logger.log(`Created directory: ${dir}`);
+        }
+      });
+    } catch (err) {
+      this.storageAvailable = false;
+      this.logger.warn(
+        `Upload storage is unavailable (${
+          err instanceof Error ? err.message : err
+        }). File uploads will be refused; every other route is unaffected.`,
+      );
+    }
   }
 
   // Sanitises here rather than trusting callers: the returned URL is stored
