@@ -15,6 +15,8 @@
 export interface PermissionDef {
   key: string;
   label: string;
+  /** Set by the API, not in the catalog below — see DEFAULT_ON_PERMISSIONS. */
+  defaultOn?: boolean;
 }
 
 export interface PermissionGroup {
@@ -160,3 +162,13 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 export const ALL_PERMISSIONS: string[] = PERMISSION_GROUPS.flatMap((g) =>
   g.permissions.map((p) => p.key),
 );
+
+/**
+ * Permissions a brand-new role starts with ticked.
+ *
+ * `canViewDashboard` is here because /admin is where every staff login lands.
+ * A role without it puts its holders on an access-denied screen the moment
+ * they sign in. It is a default, not a rule — the box stays editable, so a
+ * role that genuinely should not see the dashboard can still have it cleared.
+ */
+export const DEFAULT_ON_PERMISSIONS: string[] = ['canViewDashboard'];

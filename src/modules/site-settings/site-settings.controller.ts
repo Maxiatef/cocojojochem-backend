@@ -39,3 +39,24 @@ export class SiteSettingsController {
     return this.siteSettingsService.update(patch);
   }
 }
+
+/**
+ * The settings the public storefront needs, unauthenticated.
+ *
+ * A separate controller rather than a route on the one above, because that
+ * one carries class-level JwtAuthGuard and there is no way to opt a single
+ * route out of a class guard. Its own path, so nothing here can ever
+ * accidentally inherit the guarded controller's other routes.
+ *
+ * Only ever expose values that are safe for anyone to read.
+ */
+@ApiTags('Site Settings')
+@Controller('site-settings/public')
+export class PublicSiteSettingsController {
+  constructor(private readonly siteSettingsService: SiteSettingsService) {}
+
+  @Get()
+  async getPublicSettings() {
+    return { timezone: await this.siteSettingsService.getTimezone() };
+  }
+}

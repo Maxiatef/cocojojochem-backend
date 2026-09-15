@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  ForbiddenException,
+  ParseIntPipe,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
@@ -18,6 +30,28 @@ export class RolesController {
   @RequirePermission('canViewRoles')
   findAll() {
     return this.rolesService.findAll();
+  }
+
+  /**
+   * Just enough to populate a role picker: id, name, isSystem — no permission
+   * matrix, no user counts.
+   *
+   * Assigning a role and auditing what roles can do are different jobs with
+   * different permissions, but the assign screens all need the list of roles.
+   * Without this, canManageUserRoles on its own produced an empty dropdown,
+   * because the full list is canViewRoles.
+   *
+   * Either permission opens it, checked in the handler because @RequirePermission
+   * takes one key. Deliberately thin: someone who may only assign roles has no
+   * business reading every role's full permission set.
+   */
+  @Get('options')
+  getOptions(@Req() req: any) {
+    const permissions = req.user?.permissions ?? {};
+    if (permissions.canManageUserRoles !== true && permissions.canViewRoles !== true) {
+      throw new ForbiddenException('Missing permission: canManageUserRoles');
+    }
+    return this.rolesService.findOptions();
   }
 
   // Declared before ':id' — 'permissions' would otherwise be swallowed by the

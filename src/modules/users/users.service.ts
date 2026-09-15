@@ -163,7 +163,9 @@ export class UsersService {
     }
     // Recycled users are hidden unless explicitly asked for, so the Recycle
     // Bin never leaks into the normal list — and any other caller that lists
-    // users (e.g. a staff picker hitting ?role=SALES) gets that for free.
+    // users (e.g. a staff picker hitting ?roleId=2) gets that for free.
+    // Callers that need them, like the Roles page's "who has this role"
+    // dialog, ask with ?status=ACTIVE,DELETED.
     if (query.status) {
       const statuses = query.status.split(',').map((x) => x.trim().toUpperCase());
       qb.andWhere('user.status IN (:...statuses)', { statuses });

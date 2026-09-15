@@ -2,11 +2,11 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SiteSetting } from '../../entities';
 import { SiteSettingsService } from './site-settings.service';
-import { SiteSettingsController } from './site-settings.controller';
+import { PublicSiteSettingsController, SiteSettingsController } from './site-settings.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([SiteSetting])],
-  controllers: [SiteSettingsController],
+  controllers: [SiteSettingsController, PublicSiteSettingsController],
   providers: [SiteSettingsService],
   exports: [SiteSettingsService],
 })

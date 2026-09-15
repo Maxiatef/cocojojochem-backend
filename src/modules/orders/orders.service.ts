@@ -150,6 +150,26 @@ export class OrdersService {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_WHOLESALE_MINIMUM;
   }
 
+  /**
+   * The wholesale minimum is a rule about placing an order, not about quoting
+   * shipping — but until now it only existed inside estimateShipping(), which
+   * merely returns a flag for the UI to render. Nothing stopped a checkout
+   * from being created below the minimum, so an under-minimum cart reached
+   * Stripe and could be paid for.
+   *
+   * Enforced here, on both the signed-in and guest checkout paths, against the
+   * server's own subtotal rather than anything the client sent.
+   */
+  private async assertMeetsWholesaleMinimum(subtotal: number): Promise<void> {
+    const minimum = await this.getWholesaleMinimum();
+    if (subtotal >= minimum) return;
+    throw new BadRequestException(
+      `Wholesale minimum purchase is $${minimum.toFixed(2)}. Your subtotal is $${subtotal.toFixed(
+        2,
+      )} — add $${(minimum - subtotal).toFixed(2)} more to place this order.`,
+    );
+  }
+
   private async getFreeShippingThreshold(): Promise<number> {
     const raw = await this.siteSettingsService.getValue('FREE_SHIPPING_THRESHOLD');
     const parsed = raw != null ? Number(raw) : NaN;
@@ -580,11 +600,16 @@ export class OrdersService {
         sku: item.variant.sku,
         imageUrl: item.variant.imageUrl || item.variant.product?.imageUrl || null,
         quantity: item.quantity,
-        price: item.price,
+        // Priced from the live variant, not the stored cart row. The cart
+        // service keeps that row in sync, but checkout reads the cart
+        // directly, so this is the last point where a sale that started or
+        // ended since the item was added can still be got wrong.
+        price: getEffectivePrice(item.variant),
         purchaseType: item.purchaseType,
       }));
 
       const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      await this.assertMeetsWholesaleMinimum(subtotal);
 
       const user = await this.usersService.findById(userId);
       const cartItemsForCoupon = cart.items.map((item) => ({
@@ -673,6 +698,7 @@ export class OrdersService {
     });
 
     const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+    await this.assertMeetsWholesaleMinimum(subtotal);
 
     const cartItemsForCoupon = dto.items.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId);

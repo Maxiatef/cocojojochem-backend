@@ -11,7 +11,12 @@ import { Role } from '../../entities/Role';
 import { User } from '../../entities/User';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
-import { ALL_PERMISSIONS, PERMISSION_GROUPS, PermissionGroup } from './permissions.catalog';
+import {
+  ALL_PERMISSIONS,
+  DEFAULT_ON_PERMISSIONS,
+  PERMISSION_GROUPS,
+  PermissionGroup,
+} from './permissions.catalog';
 
 @Injectable()
 export class RolesService implements OnApplicationBootstrap {
@@ -60,6 +65,11 @@ export class RolesService implements OnApplicationBootstrap {
         if (isFullAccess) {
           next[key] = true;
           if (current[key] !== true) added.push(key);
+        } else if (!(key in current) && DEFAULT_ON_PERMISSIONS.includes(key)) {
+          // A default, so it only applies where the key is absent entirely —
+          // a role that was deliberately saved without it stays without it.
+          next[key] = true;
+          added.push(key);
         } else {
           next[key] = current[key] === true;
           if (!(key in current)) added.push(key);
@@ -105,6 +115,14 @@ export class RolesService implements OnApplicationBootstrap {
       isSystem: false,
     });
     return this.rolesRepo.save(role);
+  }
+
+  /** Picker data only — see RolesController.getOptions for why it is this thin. */
+  findOptions(): Promise<Pick<Role, 'id' | 'name' | 'isSystem'>[]> {
+    return this.rolesRepo.find({
+      select: ['id', 'name', 'isSystem'],
+      order: { name: 'ASC' },
+    });
   }
 
   async findAll(): Promise<(Role & { userCount: number })[]> {
@@ -188,7 +206,18 @@ export class RolesService implements OnApplicationBootstrap {
     return ALL_PERMISSIONS;
   }
 
+  /**
+   * `defaultOn` is computed here rather than stored in the catalog so the
+   * editor knows which boxes to pre-tick on a new role. It changes nothing
+   * about saving — these permissions remain fully editable.
+   */
   getPermissionGroups(): PermissionGroup[] {
-    return PERMISSION_GROUPS;
+    return PERMISSION_GROUPS.map((g) => ({
+      ...g,
+      permissions: g.permissions.map((p) => ({
+        ...p,
+        defaultOn: DEFAULT_ON_PERMISSIONS.includes(p.key),
+      })),
+    }));
   }
 }

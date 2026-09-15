@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { ILike, In, Repository } from 'typeorm';
 import {
   Coupon,
   CouponType,
@@ -15,10 +15,12 @@ import { CreateCouponDto } from './dto/create-coupon.dto';
 import { UpdateCouponDto } from './dto/update-coupon.dto';
 import { QueryCouponsDto } from './dto/query-coupons.dto';
 import { ValidateCouponDto, ValidateCouponCartItemDto } from './dto/validate-coupon.dto';
-// Sale status for excludeSaleItems comes from the trusted client-supplied
-// item.isOnSale flag (see ValidateCouponCartItemDto) rather than a DB
-// lookup here — see common/pricing.util.ts's isSaleActive() for how the
-// storefront computes that flag in the first place.
+import { isSaleActive } from '../../common/pricing.util';
+// Sale status for excludeSaleItems is computed here from the variant rows,
+// not taken from the client. The flag on ValidateCouponCartItemDto is only a
+// fallback for a line with no variantId; anything with one is re-resolved
+// against the database. Checkout never sent the flag at all, so trusting it
+// meant excludeSaleItems silently did nothing on a real order.
 
 function parseIds(value: string | null): number[] {
   if (!value) return [];
@@ -181,10 +183,10 @@ export class CouponsService {
       if (item.categoryId && excludedCategoryIds.includes(item.categoryId)) return false;
       if (item.brand && excludedBrands.includes(item.brand.toLowerCase())) return false;
 
-      // excludeSaleItems: relies on the trusted client-supplied isOnSale
-      // flag (see ValidateCouponCartItemDto) — a currently-on-sale item is
-      // never eligible when this restriction is enabled, regardless of
-      // what the category/product/variant/brand rules would otherwise allow.
+      // excludeSaleItems wins over every include list: a currently-on-sale
+      // item is never eligible when this restriction is on, even if it is
+      // named explicitly in includedVariantIds. The flag is resolved from the
+      // database in resolveSaleFlags() above, not taken from the client.
       if (coupon.excludeSaleItems && item.isOnSale) return false;
 
       if (!hasIncludeList) {
@@ -213,6 +215,31 @@ export class CouponsService {
     }
 
     return eligible;
+  }
+
+  /**
+   * Re-derives item.isOnSale from the variant rows before eligibility runs.
+   *
+   * Only does the query when the coupon actually restricts sale items — for
+   * every other coupon the flag is never read, so the lookup would be wasted.
+   */
+  private async resolveSaleFlags(
+    coupon: Coupon,
+    cartItems: ValidateCouponCartItemDto[],
+  ): Promise<ValidateCouponCartItemDto[]> {
+    if (!coupon.excludeSaleItems || cartItems.length === 0) return cartItems;
+
+    const variantIds = [...new Set(cartItems.map((i) => i.variantId).filter(Boolean))] as number[];
+    if (variantIds.length === 0) return cartItems;
+
+    const variants = await this.variantsRepo.findBy({ id: In(variantIds) });
+    const onSale = new Map(variants.map((v) => [v.id, isSaleActive(v)]));
+
+    return cartItems.map((item) =>
+      item.variantId != null && onSale.has(item.variantId)
+        ? { ...item, isOnSale: onSale.get(item.variantId) }
+        : item,
+    );
   }
 
   async validateCoupon(dto: ValidateCouponDto) {
@@ -283,7 +310,7 @@ export class CouponsService {
       };
     }
 
-    const cartItems = dto.cartItems || [];
+    const cartItems = await this.resolveSaleFlags(coupon, dto.cartItems || []);
     const eligibleItems = cartItems.length ? this.getEligibleItems(coupon, cartItems) : [];
     const eligibleAmount = cartItems.length
       ? eligibleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)

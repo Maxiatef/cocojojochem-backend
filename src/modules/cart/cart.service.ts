@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cart, CartItem, ProductVariant, PurchaseType } from '../../entities';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
+import { getEffectivePrice } from '../../common/pricing.util';
 
 @Injectable()
 export class CartService {
@@ -23,7 +24,31 @@ export class CartService {
     if (!cart) {
       cart = await this.cartRepo.save(this.cartRepo.create({ userId, items: [] }));
     }
+    await this.syncPrices(cart);
     return cart;
+  }
+
+  /**
+   * Re-prices the cart against its variants' current effective price.
+   *
+   * CartItem.price is a stored snapshot taken when the item was added, and a
+   * cart can sit for days. Without this, a sale that starts after the item was
+   * added never reaches the customer, and — worse — a sale that has since
+   * ended keeps charging the old discounted price all the way through
+   * checkout, because the order lines are built from these rows.
+   *
+   * Runs on every cart read and every cart mutation, since they all go through
+   * getOrCreateCart. Only rows whose price actually moved are written.
+   */
+  private async syncPrices(cart: Cart): Promise<void> {
+    const stale = (cart.items ?? []).filter((item) => {
+      if (!item.variant) return false;
+      const current = getEffectivePrice(item.variant);
+      if (Number(current) === Number(item.price)) return false;
+      item.price = current;
+      return true;
+    });
+    if (stale.length) await this.cartItemRepo.save(stale);
   }
 
   getCart(userId: number) {
@@ -97,7 +122,9 @@ export class CartService {
       cartId: cart.id,
       productVariantId: variant.id,
       quantity: dto.quantity,
-      price: variant.price,
+      // The effective price, not the list price: a variant with an active
+      // salePrice goes into the cart at the sale price.
+      price: getEffectivePrice(variant),
       purchaseType: dto.purchaseType || PurchaseType.ONE_TIME,
       subscriptionFrequencyMonths: dto.subscriptionFrequencyMonths ?? null,
     });
