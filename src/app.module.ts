@@ -100,6 +100,11 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       username: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'cocojojochem',
+      // node-postgres defaults to 10 connections per process. That is fine for
+      // one server and ruinous for serverless, where each cold-started
+      // instance opens its own pool against the same (often small) provider
+      // limit. DB_POOL_MAX lets a constrained environment ask for fewer.
+      extra: { max: Number(process.env.DB_POOL_MAX) || 10 },
       entities: [
         Role,
         Category,
@@ -139,7 +144,11 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
   WishlistItem,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
-      migrationsRun: true,
+      // Applying migrations on boot is right for a single long-lived process
+      // and wrong for a serverless one, where every cold start is a boot and
+      // several can race to apply the same migration. Set RUN_MIGRATIONS=false
+      // there and run `npm run migration:run` as a deploy step instead.
+      migrationsRun: process.env.RUN_MIGRATIONS !== 'false',
       synchronize: false,
       logging: ['error', 'warn'],
     }),

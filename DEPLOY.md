@@ -6,27 +6,39 @@ host and pointed at it.
 
 ---
 
-## Read this first: Vercel is the wrong host for this API
+## Deploying to Vercel
 
-The branch is named `vercel` to match the frontend's, but the API should not be
-deployed there. Three specific reasons, none of them a matter of taste:
+The API runs on Vercel via `api/index.ts`, which builds the Nest app on a plain
+Express instance and exports a request handler — Vercel imports that file and
+calls it per request rather than running a server.
 
-1. **Uploads are written to local disk.** `main.ts` creates `./uploads/...` and
-   serves it with `express.static`. Vercel functions have an ephemeral
-   filesystem — an uploaded product image would be gone before anyone could
-   load it, and the admin's upload flow would appear to work while losing every
-   file.
-2. **Migrations run on boot** (`migrationsRun: true` in `app.module.ts`).
-   Serverless functions cold-start constantly and concurrently. Several
-   instances would race to apply the same migration against the same database.
-3. **It is a long-lived application.** A TypeORM connection pool, a boot-time
-   permission reconcile (`RolesService.onApplicationBootstrap`), and Swagger
-   document generation all happen at startup. Serverless repeats that per cold
-   start and will exhaust Clever Cloud's connection limit.
+**Import the repo on Vercel and set the environment variables below.** No build
+command override is needed; `vercel.json` rewrites every path to the function
+and `api/index.ts` is picked up automatically.
 
-**Deploy the API to a host with a real process and a real disk** — Render,
-Railway, Fly.io, or a VPS. The frontend stays on Vercel; only
-`NEXT_PUBLIC_API_URL` needs to know where the API lives.
+### What you give up in this environment
+
+Understand these before pointing anything real at it:
+
+1. **File uploads do not work.** The upload endpoints write to `./uploads` and
+   the filesystem is read-only outside `/tmp`. Directory creation is caught and
+   logged rather than thrown, so the rest of the API is unaffected — but
+   uploading an image will fail, and any image already stored as a
+   `/uploads/...` URL will 404. Cloudflare R2 or S3 is the fix; see
+   [Uploads](#uploads).
+2. **Migrations must not run on boot.** Every cold start is a boot and several
+   can race. Set `RUN_MIGRATIONS=false` and apply migrations yourself.
+3. **Each cold-started instance opens its own connection pool.** Keep
+   `DB_POOL_MAX` small — 2 or 3 — or a traffic spike exhausts the database's
+   connection limit.
+4. **Cold starts are slow.** Nest builds the module graph, connects TypeORM,
+   runs the role permission reconcile and generates the Swagger document on
+   every one. Expect a few seconds on the first request after a quiet period.
+
+For anything beyond "see it online", deploy to a host with a real process and a
+real disk — Render, Railway, Fly, or a VPS. `main.ts` and the `Dockerfile` are
+still the path for those, and none of the four caveats above apply. See
+[Deploying to Render](#deploying-to-render-the-long-term-path).
 
 ---
 
@@ -37,7 +49,9 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | Variable | Value | Why |
 |---|---|---|
 | `NODE_ENV` | `production` | Also switches port binding to strict mode — see below. |
-| `PORT` | whatever the host assigns | Most hosts inject this. |
+| `PORT` | whatever the host assigns | Most hosts inject this. Vercel does not use it. |
+| `RUN_MIGRATIONS` | `false` **on Vercel** | Stops cold starts racing to apply migrations. Leave unset elsewhere. |
+| `DB_POOL_MAX` | `2` **on Vercel** | Each instance opens its own pool. Leave unset elsewhere for the default of 10. |
 | `DB_HOST` | `bzesax2fxpoue2au2hih-postgresql.services.clever-cloud.com` | |
 | `DB_PORT` | `50013` | Not 5432. |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
@@ -47,8 +61,26 @@ Beyond the existing `.env.example`, a deployed instance needs:
 
 ## What this branch changes in code
 
-One change, required by any hosted deployment rather than by Vercel
-specifically:
+**`src/app-config.ts` (new).** Everything that turns a bare Nest app into this
+one — CORS, the uploads mount, the Stripe raw-body carve-out, body parsers, the
+`/api` prefix, validation, Swagger — extracted from `main.ts` so the server and
+the serverless handler configure the app identically. Duplicating it would have
+meant two body-parser orderings, which is how Stripe webhook signatures break
+silently months later.
+
+**`api/index.ts` (new).** The Vercel handler. `app.init()`, not `app.listen()`
+— the platform owns the socket. The bootstrap promise is cached rather than a
+boolean flag, so two requests arriving during a cold start share one app
+instead of racing to build two.
+
+**`tsconfig.build.json`.** Excludes `api/` from the Nest build. Left in, it
+widens the inferred rootDir to the repo root and `nest build` emits
+`dist/src/main.js` instead of `dist/main.js`, breaking `start:prod` and the
+Dockerfile for every other host.
+
+**`app.module.ts`.** `migrationsRun` and the connection pool size are now
+env-driven (`RUN_MIGRATIONS`, `DB_POOL_MAX`), defaulting to the previous
+behaviour.
 
 **CORS stays open (`origin: '*'`)**, deliberately. Auth here is a Bearer token
 in the Authorization header rather than a cookie, so a wildcard origin costs
@@ -95,7 +127,7 @@ first deploy will find nothing to apply.
 `migrationsRun: false` and run `npm run migration:run` as a release step
 instead.
 
-## Deploying to Render (the recommended path)
+## Deploying to Render (the long-term path)
 
 1. New → Web Service → connect the repo.
 2. Build command `npm install && npm run build`, start command `npm run start:prod`.

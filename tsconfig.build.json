@@ -1,4 +1,9 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  // `api/` is excluded deliberately. It is the Vercel serverless entry point,
+  // which Vercel compiles with its own builder. Leaving it in widens the
+  // inferred rootDir to the repo root, so `nest build` emits dist/src/main.js
+  // instead of dist/main.js — quietly breaking `npm run start:prod` and the
+  // Dockerfile's CMD for every non-Vercel host.
+  "exclude": ["node_modules", "test", "dist", "api", "**/*spec.ts"]
 }
