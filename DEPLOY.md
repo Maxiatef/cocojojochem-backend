@@ -31,7 +31,12 @@ Understand these before pointing anything real at it:
 3. **Each cold-started instance opens its own connection pool.** Keep
    `DB_POOL_MAX` small — 2 or 3 — or a traffic spike exhausts the database's
    connection limit.
-4. **Cold starts are slow.** Nest builds the module graph, connects TypeORM,
+4. **The SEO analyzer will fail if called.** `yoastseo` require()s a parse5
+   that ships ESM-only, which throws `ERR_REQUIRE_ESM` under this runtime. The
+   engine is loaded lazily, so this is now contained to the analyze endpoints
+   rather than killing the process on boot — but running an analysis there
+   will error.
+5. **Cold starts are slow.** Nest builds the module graph, connects TypeORM,
    runs the role permission reconcile and generates the Swagger document on
    every one. Expect a few seconds on the first request after a quiet period.
 
