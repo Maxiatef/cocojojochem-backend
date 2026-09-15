@@ -151,6 +151,13 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       migrationsRun: process.env.RUN_MIGRATIONS !== 'false',
       synchronize: false,
       logging: ['error', 'warn'],
+      // Default is 10 retries at 3s apart. On a serverless runtime that means
+      // a request sits for 30 seconds and then the function is killed by its
+      // own timeout, so the real connection error is never logged. Fail fast
+      // and let the error surface instead.
+      retryAttempts: Number(process.env.DB_RETRY_ATTEMPTS ?? 2),
+      retryDelay: 1000,
+      connectTimeoutMS: 10000,
     }),
     RolesModule,
     CategoriesModule,

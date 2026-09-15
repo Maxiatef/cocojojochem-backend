@@ -47,7 +47,28 @@ async function bootstrap(): Promise<void> {
 }
 
 export default async function handler(req: Request, res: Response) {
-  if (!bootstrapped) bootstrapped = bootstrap();
-  await bootstrapped;
+  try {
+    if (!bootstrapped) bootstrapped = bootstrap();
+    await bootstrapped;
+  } catch (err) {
+    // Without this, a bootstrap failure rejects an un-awaited promise and the
+    // runtime kills the process with a bare "exit status 1" and no message —
+    // which is exactly as useful as no log at all. Print it, then reset so the
+    // next request retries rather than awaiting a permanently rejected
+    // promise.
+    bootstrapped = null;
+    // eslint-disable-next-line no-console
+    console.error('[bootstrap] Nest failed to start:', err);
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json');
+    res.end(
+      JSON.stringify({
+        statusCode: 500,
+        message: 'The API failed to start. See the function logs for the cause.',
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return;
+  }
   server(req, res);
 }
