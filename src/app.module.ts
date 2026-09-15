@@ -100,6 +100,19 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       username: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'cocojojochem',
+      // Managed Postgres (Clever Cloud, Neon, Render, RDS…) requires TLS and
+      // refuses a plaintext connection outright. Off by default so local
+      // development against a bare postgres container still connects.
+      //
+      // rejectUnauthorized:false accepts the provider's certificate without
+      // verifying it against a CA bundle. That is what these providers'
+      // own connection examples do — their certs are self-signed — and the
+      // connection is still encrypted. Set DB_SSL_REJECT_UNAUTHORIZED=true
+      // once you ship a CA bundle and want full verification.
+      ssl:
+        process.env.DB_SSL === 'true'
+          ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
+          : false,
       entities: [
         Role,
         Category,

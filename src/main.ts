@@ -30,8 +30,20 @@ async function bootstrap() {
   // first, json() for everything else).
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
+  // CORS_ORIGIN is a comma-separated allowlist for deployed environments —
+  // the frontend's domain, plus any preview domains that should work against
+  // this API. Unset means '*', which keeps local development frictionless.
+  //
+  // '*' cannot stay in production: a browser refuses to send credentials to a
+  // wildcard origin, and any site on the internet could otherwise call this
+  // API from a visitor's browser.
+  const corsOrigins = (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: '*',
+    origin: corsOrigins.length ? corsOrigins : '*',
+    credentials: corsOrigins.length > 0,
   });
 
   // Ensure upload directories exist — ported from the real cocojojo.com main.ts
@@ -107,7 +119,14 @@ async function bootstrap() {
 
   const startPort = Number(process.env.PORT) || 4000;
   const bootStartedAt = Date.now();
-  const port = await listenOnFirstFreePort(app, startPort);
+  // Falling forward to the next free port is a local-development convenience.
+  // On a host that hands you a port and routes traffic to exactly it, binding
+  // a different one means the health check never succeeds and the deploy is
+  // marked failed — so in production, bind what we were given or fail loudly.
+  const port =
+    process.env.NODE_ENV === 'production'
+      ? (await app.listen(startPort), startPort)
+      : await listenOnFirstFreePort(app, startPort);
   logStartupBanner(port, startPort, Date.now() - bootStartedAt);
 }
 bootstrap();
