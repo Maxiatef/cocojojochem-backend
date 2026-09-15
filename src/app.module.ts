@@ -100,6 +100,25 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       username: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'cocojojochem',
+      // TLS on by default for any non-local host. Managed Postgres (Clever
+      // Cloud, Neon, Render, RDS) requires it, and deriving it from the host
+      // rather than a separate flag means a deploy cannot be one forgotten
+      // env var away from failing to connect. DB_SSL=true/false overrides.
+      //
+      // rejectUnauthorized:false accepts the provider's certificate without
+      // checking it against a CA bundle — these providers use self-signed
+      // certs, and it is what their own connection examples do. The
+      // connection is still encrypted. Set DB_SSL_REJECT_UNAUTHORIZED=true
+      // once you ship a CA bundle.
+      ssl: (() => {
+        const host = process.env.DB_HOST || 'localhost';
+        const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        const enabled =
+          process.env.DB_SSL === 'true' ? true : process.env.DB_SSL === 'false' ? false : !isLocal;
+        return enabled
+          ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
+          : false;
+      })(),
       // node-postgres defaults to 10 connections per process. That is fine for
       // one server and ruinous for serverless, where each cold-started
       // instance opens its own pool against the same (often small) provider

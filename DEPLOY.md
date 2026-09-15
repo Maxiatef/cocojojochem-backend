@@ -60,6 +60,7 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `DB_HOST` | `bzesax2fxpoue2au2hih-postgresql.services.clever-cloud.com` | |
 | `DB_PORT` | `50013` | Not 5432. |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
+| `DB_SSL` | *leave unset* | TLS turns on automatically for any non-local `DB_HOST`. Set `false` only to force it off. |
 | `JWT_SECRET` | a long random string | Must not be the `change-me` default. |
 | `FRONTEND_URL` | the storefront's URL | Used in emails and Stripe redirect URLs. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `SHIPPO_API_KEY` | real keys | All optional. Missing ones disable that feature and log a warning; the API still starts. |
@@ -101,11 +102,10 @@ port it assigned, so binding a different one means the health check never
 passes and the deploy is marked failed. Under `NODE_ENV=production` it now
 binds the given port or throws.
 
-**The database connection is plaintext.** There is no `ssl` option in the
-TypeORM config, by choice. Clever Cloud accepts unencrypted connections, so
-this works — but credentials and query data cross the public internet in the
-clear. Adding `ssl: { rejectUnauthorized: false }` to `TypeOrmModule.forRoot`
-is the whole fix if that is ever wanted.
+**Database TLS is derived from the host**, not from a separate flag: on for
+any `DB_HOST` that is not localhost. A deploy should not be one forgotten
+environment variable away from being unable to connect, and every managed
+Postgres provider requires TLS. `DB_SSL=true|false` overrides it.
 
 ## Uploads
 
