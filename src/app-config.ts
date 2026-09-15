@@ -111,5 +111,21 @@ export async function configureApp(app: INestApplication): Promise<void> {
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, swaggerDocument);
+  // Swagger's CSS and JS bundles normally come off disk from
+  // node_modules/swagger-ui-dist, served by an Express static handler. A
+  // serverless deploy does not trace those files into the function bundle, so
+  // every asset 404s and the docs render as a white page with
+  // "SwaggerUIBundle is not defined" in the console.
+  //
+  // Loading them from a CDN sidesteps the filesystem entirely. Pinned to the
+  // exact version installed here (swagger-ui-dist 5.17.14) rather than a
+  // floating major, so the deployed docs and a local run are the same UI.
+  const SWAGGER_UI = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14';
+  SwaggerModule.setup('api/docs', app, swaggerDocument, {
+    customCssUrl: `${SWAGGER_UI}/swagger-ui.css`,
+    customJs: [
+      `${SWAGGER_UI}/swagger-ui-bundle.js`,
+      `${SWAGGER_UI}/swagger-ui-standalone-preset.js`,
+    ],
+  });
 }
