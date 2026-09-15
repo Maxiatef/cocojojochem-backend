@@ -43,14 +43,13 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
 | **`DB_SSL`** | **`true`** | **Clever Cloud refuses plaintext connections.** Without this the API cannot start. |
 | `DB_SSL_REJECT_UNAUTHORIZED` | `false` | Managed providers use self-signed certificates. The connection is still encrypted. |
-| `CORS_ORIGIN` | `https://your-frontend.vercel.app` | Comma-separated. Leaving it unset means `*`, which browsers refuse to send credentials to. |
 | `JWT_SECRET` | a long random string | Must not be the `change-me` default. |
 | `FRONTEND_URL` | the storefront's URL | Used in emails and Stripe redirect URLs. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `SHIPPO_API_KEY` | real keys | |
 
 ## What this branch changes in code
 
-Three changes, all required by any hosted deployment rather than by Vercel
+Two changes, both required by any hosted deployment rather than by Vercel
 specifically:
 
 **`app.module.ts` — Postgres TLS.** The TypeORM config had no `ssl` option, so
@@ -58,11 +57,12 @@ it would have been refused by Clever Cloud on the first connection attempt.
 Now driven by `DB_SSL`, defaulting to off so a local postgres container still
 works.
 
-**`main.ts` — CORS allowlist.** Was hardcoded to `origin: '*'`. That is
-unusable in production: the browser will not send credentials to a wildcard
-origin, and it invites any site to call this API from a visitor's browser.
-`CORS_ORIGIN` now takes a comma-separated list, falling back to `*` when unset
-so local development is unaffected.
+**CORS stays open (`origin: '*'`)**, deliberately. Auth here is a Bearer token
+in the Authorization header rather than a cookie, so a wildcard origin costs
+nothing — it only blocks *credentialed* requests, and this API makes none. The
+`JwtAuthGuard` + `PermissionGuard` on each route is what protects the data;
+CORS never did. This would need narrowing to an allowlist if auth ever moved to
+cookies, since browsers refuse to send them to `*`.
 
 **`main.ts` — strict port binding in production.** `listenOnFirstFreePort()`
 walks forward to the next free port when one is busy, which is a good local

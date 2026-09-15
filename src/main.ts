@@ -30,20 +30,16 @@ async function bootstrap() {
   // first, json() for everything else).
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
-  // CORS_ORIGIN is a comma-separated allowlist for deployed environments —
-  // the frontend's domain, plus any preview domains that should work against
-  // this API. Unset means '*', which keeps local development frictionless.
+  // Open CORS by request. This is safe here specifically because auth is a
+  // Bearer token in the Authorization header, not a cookie: a wildcard origin
+  // only blocks credentialed requests, and this API makes none. Every write
+  // route is still gated by JwtAuthGuard + PermissionGuard, which is what
+  // actually protects the data — CORS never did.
   //
-  // '*' cannot stay in production: a browser refuses to send credentials to a
-  // wildcard origin, and any site on the internet could otherwise call this
-  // API from a visitor's browser.
-  const corsOrigins = (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
+  // It would have to be narrowed to an allowlist if auth ever moves to
+  // cookies, since browsers refuse to send them to '*'.
   app.enableCors({
-    origin: corsOrigins.length ? corsOrigins : '*',
-    credentials: corsOrigins.length > 0,
+    origin: '*',
   });
 
   // Ensure upload directories exist — ported from the real cocojojo.com main.ts
