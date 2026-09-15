@@ -62,7 +62,7 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
 | `JWT_SECRET` | a long random string | Must not be the `change-me` default. |
 | `FRONTEND_URL` | the storefront's URL | Used in emails and Stripe redirect URLs. |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `SHIPPO_API_KEY` | real keys | |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `SHIPPO_API_KEY` | real keys | All optional. Missing ones disable that feature and log a warning; the API still starts. |
 
 ## What this branch changes in code
 
