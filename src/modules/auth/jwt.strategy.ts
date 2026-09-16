@@ -61,6 +61,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       roleId: user.roleId,
       roleName: user.role?.name ?? null,
+      // Which team this person BELONGS to. Which team they MANAGE is a
+      // separate query, and is deliberately not loaded here — it is needed
+      // only by the /teams/my-team routes, and this method runs on every
+      // authenticated request.
+      teamId: user.teamId,
       permissions: user.role?.permissions ?? {},
     };
   }

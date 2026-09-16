@@ -82,6 +82,19 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    // Two pairs, because "managing all teams" and "running the one team you
+    // are the manager of" are different jobs. An admin grants the first pair;
+    // a manager's role gets the second and, without it, sees nothing at all —
+    // being named as a team's manager conveys no access on its own.
+    group: 'Teams',
+    permissions: [
+      { key: 'canViewTeams', label: 'View all teams' },
+      { key: 'canManageTeams', label: 'Create, edit & delete teams' },
+      { key: 'canViewOwnTeam', label: "View your own team's activity" },
+      { key: 'canManageOwnTeam', label: 'Add & remove your own team members' },
+    ],
+  },
+  {
     group: 'Roles',
     permissions: [
       { key: 'canViewRoles', label: 'View roles' },

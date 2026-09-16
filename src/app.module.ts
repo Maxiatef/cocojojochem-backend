@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Role,
+  Team,
   Category,
   Function,
   Certification,
@@ -44,6 +45,7 @@ import {
 } from './entities';
 
 import { RolesModule } from './modules/roles/roles.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FunctionsModule } from './modules/functions/functions.module';
 import { CertificationsModule } from './modules/certifications/certifications.module';
@@ -139,6 +141,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       extra: { max: Number(process.env.DB_POOL_MAX) || 1 },
       entities: [
         Role,
+        Team,
         Category,
         Function,
         Certification,
@@ -192,6 +195,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       connectTimeoutMS: 10000,
     }),
     RolesModule,
+    TeamsModule,
     CategoriesModule,
     FunctionsModule,
     CertificationsModule,
