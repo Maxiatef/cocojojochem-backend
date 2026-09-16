@@ -119,21 +119,24 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
           ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
           : false;
       })(),
-      // node-postgres defaults to 10 connections per process. That is fine for
-      // one server and ruinous for serverless, where each cold-started
-      // instance opens its own pool against the same (often small) provider
-      // limit.
+      // ONE connection per process, not node-postgres' default of 10.
       //
-      // The default is 2, not 10, because the managed Postgres behind this
-      // allows about 5 connections for the whole role — a budget shared by
-      // every process using it: this deployment, local development, and any
-      // psql session. A single process taking 10 produces `too many
-      // connections for role ...` and locks the others out rather than merely
-      // slowing itself down. Forgetting to set DB_POOL_MAX should not be the
-      // difference between a working deploy and a dead one.
+      // The database allows about 5 connections for the whole role, and that
+      // budget is shared by everything using it: every warm serverless
+      // instance, local development, and any psql session. Serverless scales
+      // out by creating processes and each one wants its own pool, so the
+      // usable number is (instances x max) — there is no pool size that keeps
+      // N x max under 5 for unbounded N. 1 is simply the most instances that
+      // can coexist, and it is a ceiling rather than a fix.
       //
-      // Raise it with DB_POOL_MAX on a host with a real connection allowance.
-      extra: { max: Number(process.env.DB_POOL_MAX) || 2 },
+      // A single connection is enough because requests to one instance are
+      // served sequentially anyway; what it costs is pipelining within an
+      // instance, which is not the bottleneck here.
+      //
+      // The real fix is a database with a connection pooler in front of it
+      // (PgBouncer, as Neon and Supabase provide) or a long-lived host where
+      // one process owns the pool. See DEPLOY.md.
+      extra: { max: Number(process.env.DB_POOL_MAX) || 1 },
       entities: [
         Role,
         Category,

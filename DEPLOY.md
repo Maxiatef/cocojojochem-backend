@@ -28,10 +28,21 @@ Understand these before pointing anything real at it:
    [Uploads](#uploads).
 2. **Migrations must not run on boot.** Every cold start is a boot and several
    can race. Set `RUN_MIGRATIONS=false` and apply migrations yourself.
-3. **Each cold-started instance opens its own connection pool.** The default
-   is 2 for that reason; raising `DB_POOL_MAX` means a traffic spike can
-   exhaust the database's connection limit and lock out every other client,
-   local development included.
+3. **Each cold-started instance opens its own connection pool, and this is
+   the hard limit on this setup.** The pool defaults to 1 for that reason, but
+   1 is a ceiling, not a fix: serverless scales out by creating processes, and
+   the usable number is (warm instances x pool size) against a role that
+   allows about 5 in total — shared with local development and any psql
+   session. Enough concurrent instances will exhaust it whatever the pool size
+   is, and a boot that fails on `too many connections` retries, which makes
+   the shortage worse rather than better.
+
+   The durable fixes are a database with a connection pooler in front of it —
+   Neon and Supabase both expose a PgBouncer connection string that fronts
+   thousands of clients over a handful of real connections, and it is a
+   connection-string change rather than a code change — or a long-lived host
+   where one process owns one pool (see [Deploying to
+   Render](#deploying-to-render-the-long-term-path)).
 4. **The SEO analyzer will fail if called.** `yoastseo` require()s a parse5
    that ships ESM-only, which throws `ERR_REQUIRE_ESM` under this runtime. The
    engine is loaded lazily, so this is now contained to the analyze endpoints
@@ -57,7 +68,7 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `NODE_ENV` | `production` | Also switches port binding to strict mode — see below. |
 | `PORT` | whatever the host assigns | Most hosts inject this. Vercel does not use it. |
 | `RUN_MIGRATIONS` | `false` **on Vercel** | Stops cold starts racing to apply migrations. Leave unset elsewhere. |
-| `DB_POOL_MAX` | leave unset | Defaults to 2, which is what the current database's connection limit allows. Raise it only on a host with a real connection allowance. |
+| `DB_POOL_MAX` | leave unset | Defaults to 1 — the most instances that fit under the database's ~5 connection limit. Raise it only on a host with a real connection allowance. |
 | `DB_HOST` | `bzesax2fxpoue2au2hih-postgresql.services.clever-cloud.com` | |
 | `DB_PORT` | `50013` | Not 5432. |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
@@ -86,9 +97,9 @@ widens the inferred rootDir to the repo root and `nest build` emits
 Dockerfile for every other host.
 
 **`app.module.ts`.** `migrationsRun` and the connection pool size are now
-env-driven (`RUN_MIGRATIONS`, `DB_POOL_MAX`). The pool now defaults to 2
+env-driven (`RUN_MIGRATIONS`, `DB_POOL_MAX`). The pool now defaults to 1
 rather than node-postgres' 10 — see the comment in `app.module.ts` for why a
-shared 5-connection budget makes the larger default a liability.
+shared 5-connection budget makes any larger default a liability here.
 
 **CORS stays open (`origin: '*'`)**, deliberately. Auth here is a Bearer token
 in the Authorization header rather than a cookie, so a wildcard origin costs
