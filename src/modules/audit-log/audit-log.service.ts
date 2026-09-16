@@ -158,11 +158,31 @@ export class AuditLogService {
 
   // ------------------------------------------------------------------- read
 
-  async findAll(query: QueryAuditLogsDto) {
+  /**
+   * @param restrictToActorIds When present, the result is hard-limited to
+   * these actors regardless of what the query asks for. This is how a team
+   * manager reads their members' activity: the caller resolves the member
+   * ids, and no query parameter can widen the result beyond them. An empty
+   * array means "nobody", which is the correct answer for an empty team —
+   * never "everybody".
+   */
+  async findAll(query: QueryAuditLogsDto, restrictToActorIds?: number[]) {
     const page = Math.max(1, parseInt(query.page || '1', 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(query.limit || '50', 10) || 50));
 
     const qb = this.repo.createQueryBuilder('a');
+
+    if (restrictToActorIds) {
+      if (restrictToActorIds.length === 0) {
+        return { data: [], pagination: { total: 0, page, limit, totalPages: 0 } };
+      }
+      qb.andWhere('a.actorId IN (:...restrictActorIds)', { restrictActorIds: restrictToActorIds });
+      // A narrower actorId filter is still allowed (that is the per-member
+      // drill-down), but only within the permitted set.
+      if (query.actorId && !restrictToActorIds.includes(parseInt(query.actorId, 10))) {
+        return { data: [], pagination: { total: 0, page, limit, totalPages: 0 } };
+      }
+    }
 
     if (query.entityName) qb.andWhere('a.entityName = :entityName', { entityName: query.entityName });
     if (query.entityId) qb.andWhere('a.entityId = :entityId', { entityId: query.entityId });

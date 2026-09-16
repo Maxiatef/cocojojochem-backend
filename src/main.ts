@@ -11,14 +11,10 @@
 import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { Logger } from '@nestjs/common';
 import { networkInterfaces } from 'os';
-import * as express from 'express';
-import { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { configureApp } from './app-config';
 
 async function bootstrap() {
   // bodyParser disabled here so we can register express.raw() for the Stripe
@@ -30,84 +26,18 @@ async function bootstrap() {
   // first, json() for everything else).
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
-  app.enableCors({
-    origin: '*',
-  });
-
-  // Ensure upload directories exist — ported from the real cocojojo.com main.ts
-  const uploadDirs = ['./uploads', './uploads/products', './uploads/variants', './uploads/categories', './uploads/gallery', './uploads/temp'];
-  uploadDirs.forEach((dir) => {
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  });
-
-  // Serve uploaded images with CORS headers — same dual-path pattern as the
-  // real site (both /api/uploads and /uploads resolve to the same folder).
-  const uploadsCors = (_req: Request, res: Response, next: NextFunction) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    res.header('Access-Control-Max-Age', '86400');
-    next();
-  };
-  // Files are served straight off disk from our own origin, so the response
-  // headers are the only thing standing between an uploaded file and the
-  // browser executing it as page content.
-  //
-  //  - `nosniff` stops content-type sniffing: without it a browser may
-  //    disregard the declared type and render, say, a .csv containing markup
-  //    as HTML on this origin.
-  //  - Anything that is not a PDF or a plain raster image is forced to
-  //    download rather than render. Office files are inert either way, but
-  //    the allowlist means a type added later is safe by default.
-  //  - PDFs and images keep `inline` so a certificate opens in a new browser
-  //    tab, which is how the product page links them.
-  const INLINE_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
-  const staticOptions: Parameters<typeof express.static>[1] = {
-    setHeaders: (res, filePath) => {
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
-      res.setHeader(
-        'Content-Disposition',
-        INLINE_EXTENSIONS.includes(ext) ? 'inline' : 'attachment',
-      );
-    },
-  };
-
-  app.use('/api/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads'), staticOptions));
-  app.use('/uploads', uploadsCors, express.static(join(process.cwd(), 'uploads'), staticOptions));
-
-  // Stripe requires the raw request body to verify webhook signatures.
-  // Registered first (and bodyParser is disabled above) so this route's body
-  // arrives as an untouched Buffer instead of being parsed as JSON.
-  app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
-  // Every other route gets the normal JSON body parser that Nest would
-  // otherwise have registered automatically.
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-
-  app.setGlobalPrefix('api');
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('CocoJojoChem Wholesale API')
-    .setDescription('Backend API for the CocoJojoChem wholesale catalog, accounts, orders, and admin dashboard')
-    .setVersion('1.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
-    .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, swaggerDocument);
+  await configureApp(app);
 
   const startPort = Number(process.env.PORT) || 4000;
   const bootStartedAt = Date.now();
-  const port = await listenOnFirstFreePort(app, startPort);
+  // Falling forward to the next free port is a local-development convenience.
+  // On a host that hands you a port and routes traffic to exactly it, binding
+  // a different one means the health check never succeeds and the deploy is
+  // marked failed — so in production, bind what we were given or fail loudly.
+  const port =
+    process.env.NODE_ENV === 'production'
+      ? (await app.listen(startPort), startPort)
+      : await listenOnFirstFreePort(app, startPort);
   logStartupBanner(port, startPort, Date.now() - bootStartedAt);
 }
 bootstrap();

@@ -21,6 +21,12 @@ export class QueryUsersDto {
   @IsString()
   roleId?: string;
 
+  // Comma-separated team ids, plus the sentinel "none" for staff who are in
+  // no team. Used by the admin Teams tab and the manager's team view.
+  @IsOptional()
+  @IsString()
+  teamId?: string;
+
   // Comma-separated statuses, e.g. "DELETED" for the admin Recycle Bin.
   // Omitted means ACTIVE only — see UsersService.applyUserFilters.
   @IsOptional()
