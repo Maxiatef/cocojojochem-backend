@@ -303,25 +303,32 @@ export class EmailService {
   /**
    * The brand lockup at the top of every email.
    *
-   * One helper rather than five copies: these templates already duplicate
-   * their whole stylesheet, and the logo is the one part that has an external
-   * dependency (a URL that can break) — it should not be able to break in
-   * four places and work in the fifth.
+   * One helper rather than nine copies: the logo is the one part with an
+   * external dependency (a URL that can break), so it should not be able to
+   * break in eight templates and work in the ninth.
    *
-   * Sized with a width attribute AND an inline width, because Outlook ignores
-   * CSS width on images and everything else ignores the attribute. Height is
-   * auto so the 991x396 source keeps its aspect whatever it is replaced with.
+   * Styled entirely inline, with no dependency on a `.brand` class. Five of
+   * these templates carry a <style> block and four do not, and plenty of mail
+   * clients strip <style> regardless — an inline rule is the only thing that
+   * renders the same in all nine.
    *
-   * The alt text is the wordmark, so an inbox with images turned off — which
-   * is the default in plenty of clients — still shows the brand name rather
-   * than an empty box.
+   * The image is sized with a width ATTRIBUTE and an inline width, because
+   * Outlook ignores CSS width on images and everything else ignores the
+   * attribute. Height is auto so the 991x396 source keeps its aspect.
+   *
+   * The alt text is the wordmark, so an inbox with images turned off — the
+   * default in plenty of clients — still shows the brand name rather than an
+   * empty box.
    */
   private brandHeader(suffix?: string): string {
     const label = 'CocoJojoChem';
+    const suffixStyle =
+      'font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#6b7a70;';
     const logoUrl = this.emailLogoUrl();
 
     if (!logoUrl) {
-      return `<p class="brand">${suffix ? `${label} &middot; ${suffix}` : label}</p>`;
+      const text = suffix ? `${label} &middot; ${suffix}` : label;
+      return `<p style="${suffixStyle}margin:0 0 24px 0;">${text}</p>`;
     }
 
     const img =
@@ -332,7 +339,7 @@ export class EmailService {
     // image would make it invisible whenever images are blocked, which is
     // exactly the audience that needs to know the mail is internal.
     return suffix
-      ? `<div style="margin-bottom:24px;">${img}<p class="brand" style="margin:8px 0 0 0;">${suffix}</p></div>`
+      ? `<div style="margin-bottom:24px;">${img}<p style="${suffixStyle}margin:8px 0 0 0;">${suffix}</p></div>`
       : `<div style="margin-bottom:24px;">${img}</div>`;
   }
 
@@ -933,7 +940,7 @@ export class EmailService {
 <head><meta charset="utf-8"><title>Password Reset</title></head>
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#16241c;margin:0;padding:0;background:#ffffff;">
   <div style="max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;">
-    <p style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#6b7a70;margin-bottom:24px;">CocoJojoChem</p>
+    ${this.brandHeader()}
     <h1 style="margin:0 0 4px 0;font-size:22px;color:#16241c;font-weight:600;">Reset your password</h1>
     <p style="color:#6b7a70;font-size:14px;margin:0 0 20px 0;">Enter this code to continue resetting your password. It expires in 10 minutes.</p>
     <p id="reset-code" style="font-size:32px;font-weight:700;letter-spacing:8px;text-align:center;border:1px solid #e5e1d8;border-bottom:none;padding:16px;margin-bottom:0;">${escapeHtml(code)}</p>
@@ -975,7 +982,7 @@ export class EmailService {
 <head><meta charset="utf-8"><title>Set Your Password</title></head>
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#16241c;margin:0;padding:0;background:#ffffff;">
   <div style="max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;">
-    <p style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#6b7a70;margin-bottom:24px;">CocoJojoChem</p>
+    ${this.brandHeader()}
     <h1 style="margin:0 0 4px 0;font-size:22px;color:#16241c;font-weight:600;">Set your password</h1>
     <p style="color:#6b7a70;font-size:14px;margin:0 0 8px 0;">${greeting}</p>
     <p style="color:#6b7a70;font-size:14px;margin:0 0 24px 0;">A member of our team has started a password reset for your wholesale account. Click below to choose a new password. This link expires in 24 hours and can only be used once.</p>
@@ -1009,6 +1016,7 @@ export class EmailService {
 <head><meta charset="utf-8"><title>New Quote Request</title></head>
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
   <div style="max-width:600px;margin:0 auto;padding:20px;">
+    ${this.brandHeader('Internal')}
     <h2 style="margin-bottom:4px;">New quote request — #${qr.id}</h2>
     <p style="color:#666;margin-top:0;">Type: ${escapeHtml(qr.type)}</p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
@@ -1053,6 +1061,7 @@ export class EmailService {
 <head><meta charset="utf-8"><title>New Contact Message</title></head>
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
   <div style="max-width:600px;margin:0 auto;padding:20px;">
+    ${this.brandHeader('Internal')}
     <h2 style="margin-bottom:4px;">New contact message — #${message.id}</h2>
     <p style="color:#666;margin-top:0;">Subject: ${escapeHtml(message.subject)}</p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
