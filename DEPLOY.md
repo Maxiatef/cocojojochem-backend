@@ -28,9 +28,10 @@ Understand these before pointing anything real at it:
    [Uploads](#uploads).
 2. **Migrations must not run on boot.** Every cold start is a boot and several
    can race. Set `RUN_MIGRATIONS=false` and apply migrations yourself.
-3. **Each cold-started instance opens its own connection pool.** Keep
-   `DB_POOL_MAX` small — 2 or 3 — or a traffic spike exhausts the database's
-   connection limit.
+3. **Each cold-started instance opens its own connection pool.** The default
+   is 2 for that reason; raising `DB_POOL_MAX` means a traffic spike can
+   exhaust the database's connection limit and lock out every other client,
+   local development included.
 4. **The SEO analyzer will fail if called.** `yoastseo` require()s a parse5
    that ships ESM-only, which throws `ERR_REQUIRE_ESM` under this runtime. The
    engine is loaded lazily, so this is now contained to the analyze endpoints
@@ -56,7 +57,7 @@ Beyond the existing `.env.example`, a deployed instance needs:
 | `NODE_ENV` | `production` | Also switches port binding to strict mode — see below. |
 | `PORT` | whatever the host assigns | Most hosts inject this. Vercel does not use it. |
 | `RUN_MIGRATIONS` | `false` **on Vercel** | Stops cold starts racing to apply migrations. Leave unset elsewhere. |
-| `DB_POOL_MAX` | `2` **on Vercel** | Each instance opens its own pool. Leave unset elsewhere for the default of 10. |
+| `DB_POOL_MAX` | leave unset | Defaults to 2, which is what the current database's connection limit allows. Raise it only on a host with a real connection allowance. |
 | `DB_HOST` | `bzesax2fxpoue2au2hih-postgresql.services.clever-cloud.com` | |
 | `DB_PORT` | `50013` | Not 5432. |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | from the Clever Cloud addon | |
@@ -85,8 +86,9 @@ widens the inferred rootDir to the repo root and `nest build` emits
 Dockerfile for every other host.
 
 **`app.module.ts`.** `migrationsRun` and the connection pool size are now
-env-driven (`RUN_MIGRATIONS`, `DB_POOL_MAX`), defaulting to the previous
-behaviour.
+env-driven (`RUN_MIGRATIONS`, `DB_POOL_MAX`). The pool now defaults to 2
+rather than node-postgres' 10 — see the comment in `app.module.ts` for why a
+shared 5-connection budget makes the larger default a liability.
 
 **CORS stays open (`origin: '*'`)**, deliberately. Auth here is a Bearer token
 in the Authorization header rather than a cookie, so a wildcard origin costs

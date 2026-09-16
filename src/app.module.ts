@@ -122,8 +122,18 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       // node-postgres defaults to 10 connections per process. That is fine for
       // one server and ruinous for serverless, where each cold-started
       // instance opens its own pool against the same (often small) provider
-      // limit. DB_POOL_MAX lets a constrained environment ask for fewer.
-      extra: { max: Number(process.env.DB_POOL_MAX) || 10 },
+      // limit.
+      //
+      // The default is 2, not 10, because the managed Postgres behind this
+      // allows about 5 connections for the whole role — a budget shared by
+      // every process using it: this deployment, local development, and any
+      // psql session. A single process taking 10 produces `too many
+      // connections for role ...` and locks the others out rather than merely
+      // slowing itself down. Forgetting to set DB_POOL_MAX should not be the
+      // difference between a working deploy and a dead one.
+      //
+      // Raise it with DB_POOL_MAX on a host with a real connection allowance.
+      extra: { max: Number(process.env.DB_POOL_MAX) || 2 },
       entities: [
         Role,
         Category,

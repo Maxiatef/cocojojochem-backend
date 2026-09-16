@@ -90,4 +90,9 @@ export const AppDataSource = new DataSource({
   WishlistItem,
   ],
   migrations: ['src/migrations/*.ts'],
+  // The migration CLI is run by hand against the same database the deployment
+  // is already connected to, so it takes the smallest pool that works: it
+  // issues its statements sequentially on a single connection. Without this it
+  // would open ten and could not connect at all.
+  extra: { max: 1 },
 });
