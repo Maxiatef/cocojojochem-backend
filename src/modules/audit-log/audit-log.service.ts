@@ -188,7 +188,16 @@ export class AuditLogService {
     if (query.entityId) qb.andWhere('a.entityId = :entityId', { entityId: query.entityId });
     if (query.actorId) qb.andWhere('a.actorId = :actorId', { actorId: parseInt(query.actorId, 10) });
     if (query.actorType) qb.andWhere('a.actorType = :actorType', { actorType: query.actorType });
-    if (query.actorRole) qb.andWhere('a.actorRole = :actorRole', { actorRole: query.actorRole });
+    // Case-insensitive, so selecting "Admin" also returns the "ADMIN" rows
+    // written before roles moved from a hardcoded enum to the roles table.
+    // They are the same role under two naming schemes, and the log stores the
+    // name as it was AT THE TIME, so the rows cannot be normalised after the
+    // fact — audit_logs has a trigger rejecting UPDATE, deliberately.
+    //
+    // No index is lost to the LOWER(): actorRole has none to begin with.
+    if (query.actorRole) {
+      qb.andWhere('LOWER(a.actorRole) = LOWER(:actorRole)', { actorRole: query.actorRole });
+    }
     if (query.action) {
       qb.andWhere('a.action IN (:...actions)', { actions: query.action.split(',').map((s) => s.trim()) });
     }
@@ -303,12 +312,30 @@ export class AuditLogService {
     // in the dropdown. The affected entries stay fully reachable by actor and
     // by date; only this one filter cannot reach them, and there is no correct
     // value to offer for them.
+    // Collapsed case-insensitively, so "Admin" and the historical "ADMIN"
+    // are one choice rather than two that each return half the history.
+    // `pref` decides which spelling survives: 0 for the roles table, so the
+    // live name wins and a legacy spelling only appears when no current role
+    // matches it.
+    //
+    // The trade-off: two roles differing only in case would merge into one
+    // entry. `roles.name` is unique case-SENSITIVELY, so that is creatable —
+    // but it would be an unreadable pair of roles anyway, and merging them
+    // here is better than the alternative of splitting one real role's
+    // history across two identical-looking options.
     const roleRows = await this.repo.query(
-      `SELECT name FROM roles
-        UNION
-       SELECT DISTINCT a."actorRole" FROM audit_logs a
-        WHERE a."actorRole" IS NOT NULL AND a."actorRole" ~ '[^0-9]'
-        ORDER BY 1 ASC`,
+      `SELECT name FROM (
+         SELECT DISTINCT ON (LOWER(name)) name
+           FROM (
+                 SELECT name, 0 AS pref FROM roles
+                  UNION ALL
+                 SELECT DISTINCT a."actorRole" AS name, 1 AS pref
+                   FROM audit_logs a
+                  WHERE a."actorRole" IS NOT NULL AND a."actorRole" ~ '[^0-9]'
+                ) candidates
+          ORDER BY LOWER(name), pref
+       ) deduped
+        ORDER BY name ASC`,
     );
 
     // The action list stays the full enum: these really are a fixed
