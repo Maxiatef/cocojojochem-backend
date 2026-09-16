@@ -168,6 +168,7 @@ export class AuditLogService {
     if (query.entityId) qb.andWhere('a.entityId = :entityId', { entityId: query.entityId });
     if (query.actorId) qb.andWhere('a.actorId = :actorId', { actorId: parseInt(query.actorId, 10) });
     if (query.actorType) qb.andWhere('a.actorType = :actorType', { actorType: query.actorType });
+    if (query.actorRole) qb.andWhere('a.actorRole = :actorRole', { actorRole: query.actorRole });
     if (query.action) {
       qb.andWhere('a.action IN (:...actions)', { actions: query.action.split(',').map((s) => s.trim()) });
     }
@@ -260,26 +261,59 @@ export class AuditLogService {
     }
     const actors = [...byId.values()].sort((a, b) => (a.email || '').localeCompare(b.email || ''));
 
-    // The FULL enum, not just the values that happen to be present. These are
-    // fixed vocabularies, and an action missing from the list reads as "this
-    // system cannot record deletions" rather than "nothing has been deleted
-    // yet" — a filter that returns nothing is a useful answer.
+    // Real roles, from the roles table — NOT the actorType enum.
     //
-    // Still read from the database rather than hardcoded in the UI, so adding
-    // an action to the enum surfaces it without a frontend change.
-    // enum_range preserves declaration order, which is the logical grouping
-    // (CREATE/UPDATE/DELETE, then the auth events) rather than alphabetical.
-    const roles = await this.repo.query(
-      `SELECT unnest(enum_range(NULL::audit_logs_actortype_enum))::text AS "actorType"`,
+    // This list used to be `enum_range(audit_logs_actortype_enum)`, i.e.
+    // ADMIN / SALES / SYSTEM: the fixed vocabulary this table was built with,
+    // before roles became user-defined rows. So the filter offered three
+    // values that no longer correspond to anything an admin can assign, and
+    // omitted every role they had actually created.
+    //
+    // Both halves matter. The roles table is what exists NOW, so a role
+    // nobody has used yet is still selectable and returns an honest empty
+    // result. The distinct actorRole values are what the log actually
+    // CONTAINS, which keeps a renamed or deleted role's entries reachable —
+    // actorRole is a snapshot of the role at the time of the action, so those
+    // rows do not move when the role does.
+    //
+    // The `~ '[^0-9]'` guard drops rows whose actorRole is all digits. Those
+    // are role IDS, written by a bug in the auth and session-revoke paths that
+    // stored String(roleId) instead of the role name (fixed alongside this).
+    // They are not roles anyone can select and would show up as "1, 2, 7, 8"
+    // in the dropdown. The affected entries stay fully reachable by actor and
+    // by date; only this one filter cannot reach them, and there is no correct
+    // value to offer for them.
+    const roleRows = await this.repo.query(
+      `SELECT name FROM roles
+        UNION
+       SELECT DISTINCT a."actorRole" FROM audit_logs a
+        WHERE a."actorRole" IS NOT NULL AND a."actorRole" ~ '[^0-9]'
+        ORDER BY 1 ASC`,
     );
+
+    // The action list stays the full enum: these really are a fixed
+    // vocabulary, and an action missing from the list would read as "this
+    // system cannot record deletions" rather than "nothing has been deleted
+    // yet". Read from the database rather than hardcoded in the UI so adding
+    // one surfaces it without a frontend change. enum_range preserves
+    // declaration order, which is the logical grouping (CREATE/UPDATE/DELETE,
+    // then the auth events) rather than alphabetical.
     const actions = await this.repo.query(
       `SELECT unnest(enum_range(NULL::audit_logs_action_enum))::text AS "action"`,
+    );
+
+    // Kept separate and still exposed: automated changes (Stripe, Shippo,
+    // cron) have no role at all, so filtering them needs actorType and no
+    // entry in `roles` could ever match them.
+    const actorTypes = await this.repo.query(
+      `SELECT unnest(enum_range(NULL::audit_logs_actortype_enum))::text AS "actorType"`,
     );
 
     return {
       entityNames,
       actors,
-      roles: roles.map((r: { actorType: string }) => r.actorType),
+      roles: roleRows.map((r: { name: string }) => r.name),
+      actorTypes: actorTypes.map((r: { actorType: string }) => r.actorType),
       actions: actions.map((r: { action: string }) => r.action),
     };
   }

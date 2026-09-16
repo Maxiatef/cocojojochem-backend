@@ -52,8 +52,10 @@ export class UsersService {
     private readonly emailService: EmailService,
   ) {}
 
+  // `role` is joined because the login path records the actor's role name in
+  // the audit log, and without it every sign-in would be logged with no role.
   findByEmail(email: string) {
-    return this.usersRepo.findOne({ where: { email }, relations: ['company'] });
+    return this.usersRepo.findOne({ where: { email }, relations: ['company', 'role'] });
   }
 
   // Backs the clickable stat cards atop the admin Users page.
@@ -447,7 +449,11 @@ export class UsersService {
         actorType: AuditActorType.ADMIN,
         actorId: userId,
         actorEmail: user?.email ?? null,
-        actorRole: user?.roleId ? String(user.roleId) : null,
+        // The role NAME, not the id. This wrote String(roleId) until it was
+        // caught by the audit log's role filter offering "1, 2, 7, 8" as
+        // choices — actorRole is a human-readable snapshot, and a bare id is
+        // meaningless once the role is renamed or deleted.
+        actorRole: user?.role?.name ?? null,
         entityName: 'User',
         entityId: String(userId),
         entityLabel: user?.email ?? null,

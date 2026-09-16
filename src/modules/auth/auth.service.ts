@@ -106,7 +106,16 @@ export class AuthService {
    */
   private async auditAuth(
     action: AuditAction,
-    user: { id: number; email: string; roleId: number | null } | null,
+    // Carries `role` as well as `roleId`: the log stores the role's NAME, and
+    // a type that only offered the id is how String(roleId) ended up in the
+    // actorRole column. Every caller loads it (findByEmail, findById and
+    // authLookup all join the relation).
+    user: {
+      id: number;
+      email: string;
+      roleId: number | null;
+      role?: { name: string } | null;
+    } | null,
     attemptedEmail: string,
     summary: string,
   ): Promise<void> {
@@ -119,7 +128,7 @@ export class AuthService {
       actorType: isStaff ? AuditActorType.ADMIN : AuditActorType.SYSTEM,
       actorId: user?.id ?? null,
       actorEmail: user?.email ?? attemptedEmail,
-      actorRole: user?.roleId ? String(user.roleId) : null,
+      actorRole: user?.role?.name ?? null,
       entityName: 'User',
       entityId: user ? String(user.id) : 'unknown',
       entityLabel: user?.email ?? attemptedEmail,

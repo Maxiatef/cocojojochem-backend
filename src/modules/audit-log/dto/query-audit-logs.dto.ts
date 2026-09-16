@@ -39,6 +39,17 @@ export class QueryAuditLogsDto {
   @IsString()
   actorType?: string;
 
+  /**
+   * The role the actor held AT THE TIME of the action, by name.
+   *
+   * Distinct from actorType, which is the fixed ADMIN|SALES|SYSTEM vocabulary
+   * the table was built with. Roles are user-defined now, so this is the one
+   * that answers "what did the Managers do".
+   */
+  @IsOptional()
+  @IsString()
+  actorRole?: string;
+
   @IsOptional()
   @IsString()
   from?: string;
