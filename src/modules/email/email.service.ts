@@ -277,6 +277,65 @@ export class EmailService {
     }
   }
 
+  /**
+   * Absolute URL of the logo, or null when there isn't a usable one.
+   *
+   * Email cannot use a relative path, and it cannot use localhost either: the
+   * recipient's mail client resolves the URL on THEIR machine, so a dev
+   * default would render as a broken image in a real customer's invoice.
+   * Returning null in that case is what lets the caller fall back to the
+   * wordmark rather than shipping a broken image.
+   *
+   * EMAIL_LOGO_URL overrides, for hosting the asset on a CDN rather than
+   * serving it from the storefront.
+   */
+  private emailLogoUrl(): string | null {
+    const explicit = process.env.EMAIL_LOGO_URL?.trim();
+    if (explicit) return explicit;
+
+    const base = process.env.FRONTEND_URL?.trim();
+    if (!base) return null;
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?(\/|$)/i.test(base)) return null;
+
+    return `${base.replace(/\/+$/, '')}/brand/cocojojo-logo.png`;
+  }
+
+  /**
+   * The brand lockup at the top of every email.
+   *
+   * One helper rather than five copies: these templates already duplicate
+   * their whole stylesheet, and the logo is the one part that has an external
+   * dependency (a URL that can break) — it should not be able to break in
+   * four places and work in the fifth.
+   *
+   * Sized with a width attribute AND an inline width, because Outlook ignores
+   * CSS width on images and everything else ignores the attribute. Height is
+   * auto so the 991x396 source keeps its aspect whatever it is replaced with.
+   *
+   * The alt text is the wordmark, so an inbox with images turned off — which
+   * is the default in plenty of clients — still shows the brand name rather
+   * than an empty box.
+   */
+  private brandHeader(suffix?: string): string {
+    const label = 'CocoJojoChem';
+    const logoUrl = this.emailLogoUrl();
+
+    if (!logoUrl) {
+      return `<p class="brand">${suffix ? `${label} &middot; ${suffix}` : label}</p>`;
+    }
+
+    const img =
+      `<img src="${logoUrl}" alt="${label}" width="180" height="72" ` +
+      `style="display:block;width:180px;height:auto;max-width:100%;border:0;outline:none;text-decoration:none;" />`;
+
+    // The suffix stays a separate text line — burning "Internal" into an
+    // image would make it invisible whenever images are blocked, which is
+    // exactly the audience that needs to know the mail is internal.
+    return suffix
+      ? `<div style="margin-bottom:24px;">${img}<p class="brand" style="margin:8px 0 0 0;">${suffix}</p></div>`
+      : `<div style="margin-bottom:24px;">${img}</div>`;
+  }
+
   private buildOrderConfirmationEmail(order: Order, email: string): string {
     const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
     const name = order.user?.fullName || order.guestName || 'there';
@@ -342,7 +401,7 @@ export class EmailService {
 </head>
 <body>
     <div class="container">
-        <p class="brand">CocoJojoChem</p>
+        ${this.brandHeader()}
         <h1>Order Confirmation</h1>
         <p class="subhead">Thank you for your order, ${escapeHtml(name)} — payment received and your order is being processed.</p>
 
@@ -436,7 +495,7 @@ export class EmailService {
 </head>
 <body>
     <div class="container">
-        <p class="brand">CocoJojoChem</p>
+        ${this.brandHeader()}
         <h1>Your order has been cancelled</h1>
         <p class="subhead">Hi ${escapeHtml(name)}, order #${order.id} has been cancelled.</p>
 
@@ -566,7 +625,7 @@ export class EmailService {
 </head>
 <body>
     <div class="container">
-        <p class="brand">CocoJojoChem &middot; Internal</p>
+        ${this.brandHeader('Internal')}
         <h1>Refund required</h1>
         <p class="subhead">Order #${order.id} was cancelled after payment. This refund is NOT automatic.</p>
 
@@ -714,7 +773,7 @@ export class EmailService {
 </head>
 <body>
     <div class="container">
-        <p class="brand">CocoJojoChem</p>
+        ${this.brandHeader()}
         <h1>New Order Received</h1>
         <p class="subhead">Order #${order.id} was just placed and paid.</p>
 
@@ -801,7 +860,7 @@ export class EmailService {
 </head>
 <body>
     <div class="container">
-        <p class="brand">CocoJojoChem</p>
+        ${this.brandHeader()}
         <h1>Your Order Has Shipped</h1>
         <p class="subhead">Order #${order.id} is on its way to you.</p>
 
