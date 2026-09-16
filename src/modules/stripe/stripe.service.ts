@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import Stripe from 'stripe';
 
 export interface CheckoutSessionLineItemInput {
@@ -19,10 +19,40 @@ export interface CreateCheckoutSessionInput {
 @Injectable()
 export class StripeService {
   private readonly logger = new Logger('StripeService');
-  private readonly stripe: Stripe;
+  private stripeClient: Stripe | null = null;
 
   constructor() {
-    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+    // Built here only when a key exists. The Stripe constructor throws
+    // "Neither apiKey nor config.authenticator provided" on an undefined key,
+    // and a throw inside a provider constructor aborts the whole Nest
+    // bootstrap — so an environment without Stripe configured could not start
+    // the API at all, including every route that has nothing to do with
+    // payments.
+    //
+    // Checkout is the only thing that needs it, and it fails with a clear 503
+    // below instead.
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (key) {
+      this.stripeClient = new Stripe(key);
+    } else {
+      this.logger.warn(
+        'STRIPE_SECRET_KEY is not set — checkout and webhook verification are disabled. Everything else runs normally.',
+      );
+    }
+  }
+
+  /** True when payments are actually usable. */
+  get isConfigured(): boolean {
+    return this.stripeClient !== null;
+  }
+
+  private get stripe(): Stripe {
+    if (!this.stripeClient) {
+      throw new ServiceUnavailableException(
+        'Payments are not configured on this environment (STRIPE_SECRET_KEY is missing).',
+      );
+    }
+    return this.stripeClient;
   }
 
   // Built from a not-yet-persisted PendingCheckout, not an Order — the
