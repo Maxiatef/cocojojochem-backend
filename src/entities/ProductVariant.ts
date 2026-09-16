@@ -35,6 +35,13 @@ export class ProductVariant {
   @Column()
   label: string; // "1 Gallon", "1 Pail", "10 Gallon", "1 Drum", "25 KG"
 
+  // Free text, not an enum or a hex value: suppliers describe colour in their
+  // own words ("Pale yellow", "Water white", "Off-white to cream"), and a
+  // fixed list would force whoever enters it to pick the nearest wrong one.
+  // Null where colour is not a meaningful property of the material.
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  color: string | null;
+
   @Column('decimal', { precision: 10, scale: 2 })
   price: string;
 

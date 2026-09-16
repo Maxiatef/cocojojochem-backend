@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -28,6 +29,12 @@ export class CreateVariantDto {
 
   @IsString()
   label: string;
+
+  // Optional, and nullable on the way in: the form sends null to clear it.
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  color?: string | null;
 
   @IsNumber()
   price: number;
