@@ -88,6 +88,34 @@ export class CartService {
     );
   }
 
+  /**
+   * Enforces the per-variant minimum order quantity.
+   *
+   * The mirror image of assertWithinOrderLimit above, and counted the same
+   * way: cumulatively across every line of that variant in the cart, not per
+   * line item. Someone with 3 + 2 of a variant whose MOQ is 5 has met it.
+   *
+   * Null MOQ means no minimum — that is the state of every variant today, so
+   * this is inert until someone sets one.
+   *
+   * Note this can still be escaped by removing a line afterwards, which is
+   * why OrdersService re-checks the whole cart at checkout. The cart is a
+   * convenience; the order is the boundary.
+   */
+  private assertMeetsMinimumOrder(
+    variant: ProductVariant,
+    productName: string | undefined,
+    requestedTotal: number,
+  ) {
+    if (variant.moq == null || variant.moq <= 1) return;
+    if (requestedTotal >= variant.moq) return;
+
+    const label = productName ? `${productName} (${variant.label})` : variant.label;
+    throw new BadRequestException(
+      `${label} has a minimum order of ${variant.moq} units. Please increase the quantity to at least ${variant.moq}.`,
+    );
+  }
+
   // Variant stays fully visible/browsable on the storefront regardless — this
   // only blocks the purchase action itself until availableFrom arrives.
   private assertAvailable(variant: ProductVariant, productName?: string) {
@@ -117,6 +145,7 @@ export class CartService {
 
     const alreadyInCart = this.quantityAlreadyInCart(cart, variant.id);
     this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + dto.quantity);
+    this.assertMeetsMinimumOrder(variant, variant.product?.name, alreadyInCart + dto.quantity);
 
     const item = this.cartItemRepo.create({
       cartId: cart.id,
@@ -146,6 +175,7 @@ export class CartService {
       this.assertAvailable(variant, variant.product?.name);
       const alreadyInCart = this.quantityAlreadyInCart(cart, item.productVariantId, item.id);
       this.assertWithinOrderLimit(variant, variant.product?.name, alreadyInCart, alreadyInCart + quantity);
+      this.assertMeetsMinimumOrder(variant, variant.product?.name, alreadyInCart + quantity);
     }
 
     item.quantity = quantity;

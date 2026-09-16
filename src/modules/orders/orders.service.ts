@@ -429,28 +429,62 @@ export class OrdersService {
   // race condition or a direct API call could bypass CartService's check.
   // Sums quantities per variant across all line items before comparing,
   // matching the cumulative enforcement used in cart.service.ts.
+  /**
+   * One row per variant, quantities summed across every line item.
+   *
+   * Shared by the min and max checks so they can never disagree about what
+   * "how many of this variant" means — an order can legitimately carry the
+   * same variant on more than one line.
+   */
+  private totalsPerVariant(
+    lines: { variant: ProductVariant; productName: string; quantity: number }[],
+  ): { variant: ProductVariant; productName: string; total: number }[] {
+    const totals = new Map<number, { variant: ProductVariant; productName: string; total: number }>();
+    for (const line of lines) {
+      const existing = totals.get(line.variant.id);
+      if (existing) existing.total += line.quantity;
+      else
+        totals.set(line.variant.id, {
+          variant: line.variant,
+          productName: line.productName,
+          total: line.quantity,
+        });
+    }
+    return [...totals.values()];
+  }
+
   private assertOrderLimits(
     lines: { variant: ProductVariant; productName: string; quantity: number }[],
   ) {
-    const totalsByVariant = new Map<number, number>();
-    for (const line of lines) {
-      totalsByVariant.set(
-        line.variant.id,
-        (totalsByVariant.get(line.variant.id) || 0) + line.quantity,
-      );
-    }
-    const seen = new Set<number>();
-    for (const line of lines) {
-      const { variant, productName } = line;
-      if (seen.has(variant.id)) continue;
-      seen.add(variant.id);
+    for (const { variant, productName, total } of this.totalsPerVariant(lines)) {
       if (!variant.limitPerOrder || variant.maxOrderQuantity == null) continue;
-      const total = totalsByVariant.get(variant.id) || 0;
       if (total > variant.maxOrderQuantity) {
         throw new BadRequestException(
           `${productName} (${variant.label}) is limited to ${variant.maxOrderQuantity} units per order. Please reduce the quantity and try again.`,
         );
       }
+    }
+  }
+
+  /**
+   * Server-side re-validation of the per-variant MINIMUM order quantity.
+   *
+   * CartService checks this on add, but the cart is not the boundary: a line
+   * can be removed after the check, quantities can race, and the guest
+   * checkout path never touches CartService at all. This is the one place
+   * that actually decides whether an under-minimum order can be placed.
+   *
+   * Null or 1 means no minimum, which is every variant today.
+   */
+  private assertMinimumOrders(
+    lines: { variant: ProductVariant; productName: string; quantity: number }[],
+  ) {
+    for (const { variant, productName, total } of this.totalsPerVariant(lines)) {
+      if (variant.moq == null || variant.moq <= 1) continue;
+      if (total >= variant.moq) continue;
+      throw new BadRequestException(
+        `${productName} (${variant.label}) has a minimum order of ${variant.moq} units. You have ${total} — please increase the quantity and try again.`,
+      );
     }
   }
 
@@ -592,6 +626,7 @@ export class OrdersService {
       }));
       this.assertAvailability(cartLines);
       this.assertOrderLimits(cartLines);
+      this.assertMinimumOrders(cartLines);
 
       const itemSnapshots: PendingCheckoutItemSnapshot[] = cart.items.map((item) => ({
         productVariantId: item.productVariantId,
@@ -683,6 +718,7 @@ export class OrdersService {
     });
     this.assertAvailability(guestLines);
     this.assertOrderLimits(guestLines);
+    this.assertMinimumOrders(guestLines);
 
     const itemSnapshots: PendingCheckoutItemSnapshot[] = dto.items.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId)!;

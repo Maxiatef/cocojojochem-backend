@@ -58,9 +58,12 @@ export class CreateVariantDto {
   @IsString()
   imageUrl?: string;
 
+  // Nullable on the way in: the admin form sends null to clear the minimum.
+  // @IsOptional() skips validation for null as well as undefined, so IsInt
+  // does not reject it.
   @IsOptional()
   @IsInt()
-  moq?: number;
+  moq?: number | null;
 
   // Per-variant override for the global low-stock threshold (10). When set,
   // this variant is flagged "running low" at this quantity instead.
