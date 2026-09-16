@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Role,
+  Team,
   Category,
   Function,
   Certification,
@@ -44,6 +45,7 @@ import {
 } from './entities';
 
 import { RolesModule } from './modules/roles/roles.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FunctionsModule } from './modules/functions/functions.module';
 import { CertificationsModule } from './modules/certifications/certifications.module';
@@ -102,6 +104,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       database: process.env.DB_NAME || 'cocojojochem',
       entities: [
         Role,
+        Team,
         Category,
         Function,
         Certification,
@@ -142,8 +145,21 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       migrationsRun: true,
       synchronize: false,
       logging: ['error', 'warn'],
+      // Cap on simultaneous connections THIS process holds open.
+      //
+      // Default 2 rather than node-postgres' 10 because the managed Postgres
+      // this connects to allows about 5 connections for the whole role — and
+      // that budget is shared by every process using it: the local dev server,
+      // a deployed instance, and any psql session you have open. One process
+      // grabbing 10 is what produces `too many connections for role ...`, and
+      // it locks everyone else out rather than slowing itself down.
+      //
+      // Raise it with DB_POOL_MAX on a host with a real connection allowance;
+      // 2 is enough for development, where requests arrive one at a time.
+      extra: { max: Number(process.env.DB_POOL_MAX) || 2 },
     }),
     RolesModule,
+    TeamsModule,
     CategoriesModule,
     FunctionsModule,
     CertificationsModule,

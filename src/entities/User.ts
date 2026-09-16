@@ -13,6 +13,7 @@ import { QuoteRequest } from './QuoteRequest';
 import { Cart } from './Cart';
 import { Order } from './Order';
 import { Role } from './Role';
+import { Team } from './Team';
 
 // Soft-delete state. DELETED accounts can't log in and appear in the admin
 // Recycle Bin, from where they're either restored or permanently deleted.
@@ -71,6 +72,23 @@ export class User {
 
   @Column({ type: 'timestamp', nullable: true })
   deletedAt: Date | null;
+
+  // Staff grouping. Null for customers and for staff who are in no team.
+  // ON DELETE SET NULL so deleting a team empties it rather than deleting the
+  // people in it.
+  @Column({ type: 'int', nullable: true })
+  teamId: number | null;
+
+  @ManyToOne(() => Team, (team) => team.members, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'teamId' })
+  team: Team | null;
+
+  // Teams this user manages. Almost always zero or one, but modelled as a
+  // collection because nothing in the schema forbids one person running two
+  // teams and a unique constraint here would be a business rule invented by
+  // the database.
+  @OneToMany(() => Team, (team) => team.manager)
+  managedTeams: Team[];
 
   @Column({ type: 'int', nullable: true })
   companyId: number | null;

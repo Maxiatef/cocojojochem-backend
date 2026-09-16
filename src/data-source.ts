@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 dotenv.config();
 import {
   Role,
+  Team,
   Category,
   Function,
   Certification,
@@ -53,6 +54,7 @@ export const AppDataSource = new DataSource({
   logging: ['error', 'warn'],
   entities: [
     Role,
+    Team,
     Category,
     Function,
     Certification,
@@ -90,4 +92,8 @@ export const AppDataSource = new DataSource({
   WishlistItem,
   ],
   migrations: ['src/migrations/*.ts'],
+  // The migration CLI runs alongside a dev server that already holds a pool
+  // open, so it takes the smallest one that works: it issues its statements
+  // sequentially on a single connection.
+  extra: { max: 1 },
 });

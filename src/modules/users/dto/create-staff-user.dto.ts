@@ -17,4 +17,8 @@ export class CreateStaffUserDto {
 
   @IsInt()
   roleId: number;
+
+  @IsOptional()
+  @IsInt()
+  teamId?: number | null;
 }

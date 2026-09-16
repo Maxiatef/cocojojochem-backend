@@ -1,4 +1,5 @@
 export * from './Role';
+export * from './Team';
 export * from './Category';
 export * from './Function';
 export * from './Certification';
@@ -33,5 +34,4 @@ export * from './ShippingRateTier';
 export * from './QuoteListItem';
 export * from './PendingCheckout';
 export * from './AuditLog';
-export * from './WishlistItem';
 export * from './WishlistItem';
