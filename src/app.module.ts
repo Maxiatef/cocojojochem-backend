@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Role,
+  Team,
   Category,
   Function,
   Certification,
@@ -44,6 +45,7 @@ import {
 } from './entities';
 
 import { RolesModule } from './modules/roles/roles.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FunctionsModule } from './modules/functions/functions.module';
 import { CertificationsModule } from './modules/certifications/certifications.module';
@@ -100,8 +102,46 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       username: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'cocojojochem',
+      // TLS on by default for any non-local host. Managed Postgres (Clever
+      // Cloud, Neon, Render, RDS) requires it, and deriving it from the host
+      // rather than a separate flag means a deploy cannot be one forgotten
+      // env var away from failing to connect. DB_SSL=true/false overrides.
+      //
+      // rejectUnauthorized:false accepts the provider's certificate without
+      // checking it against a CA bundle — these providers use self-signed
+      // certs, and it is what their own connection examples do. The
+      // connection is still encrypted. Set DB_SSL_REJECT_UNAUTHORIZED=true
+      // once you ship a CA bundle.
+      ssl: (() => {
+        const host = process.env.DB_HOST || 'localhost';
+        const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        const enabled =
+          process.env.DB_SSL === 'true' ? true : process.env.DB_SSL === 'false' ? false : !isLocal;
+        return enabled
+          ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
+          : false;
+      })(),
+      // ONE connection per process, not node-postgres' default of 10.
+      //
+      // The database allows about 5 connections for the whole role, and that
+      // budget is shared by everything using it: every warm serverless
+      // instance, local development, and any psql session. Serverless scales
+      // out by creating processes and each one wants its own pool, so the
+      // usable number is (instances x max) — there is no pool size that keeps
+      // N x max under 5 for unbounded N. 1 is simply the most instances that
+      // can coexist, and it is a ceiling rather than a fix.
+      //
+      // A single connection is enough because requests to one instance are
+      // served sequentially anyway; what it costs is pipelining within an
+      // instance, which is not the bottleneck here.
+      //
+      // The real fix is a database with a connection pooler in front of it
+      // (PgBouncer, as Neon and Supabase provide) or a long-lived host where
+      // one process owns the pool. See DEPLOY.md.
+      extra: { max: Number(process.env.DB_POOL_MAX) || 1 },
       entities: [
         Role,
+        Team,
         Category,
         Function,
         Certification,
@@ -139,11 +179,23 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
   WishlistItem,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
-      migrationsRun: true,
+      // Applying migrations on boot is right for a single long-lived process
+      // and wrong for a serverless one, where every cold start is a boot and
+      // several can race to apply the same migration. Set RUN_MIGRATIONS=false
+      // there and run `npm run migration:run` as a deploy step instead.
+      migrationsRun: process.env.RUN_MIGRATIONS !== 'false',
       synchronize: false,
       logging: ['error', 'warn'],
+      // Default is 10 retries at 3s apart. On a serverless runtime that means
+      // a request sits for 30 seconds and then the function is killed by its
+      // own timeout, so the real connection error is never logged. Fail fast
+      // and let the error surface instead.
+      retryAttempts: Number(process.env.DB_RETRY_ATTEMPTS ?? 2),
+      retryDelay: 1000,
+      connectTimeoutMS: 10000,
     }),
     RolesModule,
+    TeamsModule,
     CategoriesModule,
     FunctionsModule,
     CertificationsModule,

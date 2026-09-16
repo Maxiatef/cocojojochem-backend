@@ -110,13 +110,16 @@ export class UsersService {
   authLookup(id: number) {
     return this.usersRepo.findOne({
       where: { id },
-      select: ['id', 'email', 'roleId', 'status'],
+      select: ['id', 'email', 'roleId', 'status', 'teamId'],
       relations: ['role'],
     });
   }
 
   async findById(id: number) {
-    const user = await this.usersRepo.findOne({ where: { id }, relations: ['company', 'role'] });
+    const user = await this.usersRepo.findOne({
+      where: { id },
+      relations: ['company', 'role', 'team'],
+    });
     if (!user) throw new NotFoundException(`User #${id} not found`);
     return user;
   }
@@ -161,6 +164,18 @@ export class UsersService {
         qb.andWhere('user.roleId IN (:...roleIds)', { roleIds: ids });
       }
     }
+    if (query.teamId) {
+      const parts = query.teamId.split(',').map((t) => t.trim()).filter(Boolean);
+      const wantsNone = parts.includes('none');
+      const ids = parts.filter((p) => /^\d+$/.test(p)).map(Number);
+      if (wantsNone && ids.length) {
+        qb.andWhere('(user.teamId IN (:...teamIds) OR user.teamId IS NULL)', { teamIds: ids });
+      } else if (wantsNone) {
+        qb.andWhere('user.teamId IS NULL');
+      } else if (ids.length) {
+        qb.andWhere('user.teamId IN (:...teamIds)', { teamIds: ids });
+      }
+    }
     // Recycled users are hidden unless explicitly asked for, so the Recycle
     // Bin never leaks into the normal list — and any other caller that lists
     // users (e.g. a staff picker hitting ?roleId=2) gets that for free.
@@ -183,12 +198,14 @@ export class UsersService {
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.company', 'company')
       .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('user.team', 'team')
       .leftJoin('user.orders', 'orders')
       .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
       .addSelect('COALESCE(SUM(orders.total), 0)', 'totalSpent')
       .groupBy('user.id')
       .addGroupBy('company.id')
       .addGroupBy('role.id')
+      .addGroupBy('team.id')
       .orderBy('user.createdAt', 'DESC');
 
     this.applyUserFilters(qb, query);
@@ -261,6 +278,10 @@ export class UsersService {
     if (dto.lastName !== undefined) user.lastName = dto.lastName || null;
     if (dto.phone !== undefined) user.phone = dto.phone;
     if (dto.roleId !== undefined) user.roleId = dto.roleId;
+    // `undefined` leaves the team alone; an explicit `null` removes it. A
+    // customer has no team, so clearing the role does not clear the team on
+    // its own — the admin decides both.
+    if (dto.teamId !== undefined) user.teamId = dto.teamId;
     if (dto.companyId !== undefined) user.companyId = dto.companyId;
 
     // Recompose the canonical display name from the parts the admin edited.
@@ -533,6 +554,7 @@ export class UsersService {
       fullName: dto.fullName,
       phone: dto.phone,
       roleId: dto.roleId,
+      teamId: dto.teamId ?? null,
     });
     // Renamed on destructure — `passwordHash` is already bound above in this
     // scope as the value we just hashed.

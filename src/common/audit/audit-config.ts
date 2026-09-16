@@ -83,6 +83,7 @@ export const ROUTE_ENTITY: Record<string, string> = {
   'shipping-rate-tiers': 'ShippingRateTier',
   'seo-pages': 'SeoPage',
   newsletter: 'NewsletterSubscriber',
+  teams: 'Team',
 };
 
 /**
@@ -99,6 +100,7 @@ export const LABEL_FIELDS: Record<string, string[]> = {
   Company: ['companyName', 'name'],
   Coupon: ['code'],
   Category: ['name'],
+  Team: ['name'],
   ContactMessage: ['subject'],
   QuoteRequest: ['fullName'],
   SiteSetting: ['key'],

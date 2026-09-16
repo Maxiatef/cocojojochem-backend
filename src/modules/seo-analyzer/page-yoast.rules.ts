@@ -26,7 +26,18 @@
  * sharing its layout.
  */
 
-import { interpreters } from 'yoastseo';
+// NOT a top-level import of 'yoastseo'. That single import defeated the lazy
+// loading below and pulled the engine in at module load — and because this
+// file is in the AppModule graph, that meant on every boot of the whole API.
+//
+// It is fatal rather than merely slow on a serverless runtime: yoastseo
+// require()s a parse5 that ships ESM-only, which throws ERR_REQUIRE_ESM and
+// takes the entire process down. Every route 500s because of an SEO helper
+// nothing had called.
+//
+// Kept as a type-only import so the signature below still type-checks;
+// type imports are erased at compile time and load nothing.
+import type { interpreters as Interpreters } from 'yoastseo';
 
 /** Yoast's own rating bands: <=4 bad, 5-7 ok, >7 good, 0 feedback. */
 export type PageYoastRating = 'good' | 'ok' | 'bad' | 'feedback' | 'error' | '';
@@ -110,6 +121,7 @@ function plainText(html: string): string {
 function loadEngine() {
   /* eslint-disable @typescript-eslint/no-var-requires */
   const yoast = require('yoastseo');
+  const interpreters: typeof Interpreters = yoast.interpreters;
   const Researcher =
     require('yoastseo/build/languageProcessing/languages/en/Researcher').default;
   /* eslint-enable @typescript-eslint/no-var-requires */
@@ -118,6 +130,7 @@ function loadEngine() {
     SeoAssessor: yoast.SeoAssessor,
     ContentAssessor: yoast.ContentAssessor,
     Researcher,
+    interpreters,
   };
 }
 
@@ -132,7 +145,7 @@ const EMPTY: PageYoastResult = {
 
 export function analyzePageWithYoast(input: PageYoastInput): PageYoastResult {
   try {
-    const { Paper, SeoAssessor, ContentAssessor, Researcher } = loadEngine();
+    const { Paper, SeoAssessor, ContentAssessor, Researcher, interpreters } = loadEngine();
 
     const title = input.title || '';
     const keyphrase = (input.focusKeyphrase || '').trim();
