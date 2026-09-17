@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -48,8 +48,15 @@ export class CategoriesController {
 
   // Full detail view for the admin "View Category" page: category + parent/children + all products in it.
   @Get('id/:id')
-  findByIdDetail(@Param('id', ParseIntPipe) id: number) {
+  findByIdDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.categoriesService.findByIdWithProducts(id);
+  }
+
+  // Same detail view as 'id/:id', reached by slug. Declared before ':slug' so
+  // "slug" is not itself read as a category slug.
+  @Get('slug/:slug/detail')
+  findBySlugDetail(@Param('slug') slug: string) {
+    return this.categoriesService.findBySlugWithProducts(slug);
   }
 
   @Get(':slug')
@@ -79,14 +86,14 @@ export class CategoriesController {
   @Patch(':id')
   @RequirePermission('canEditCategory')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCategoryDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCategoryDto) {
     return this.categoriesService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('canDeleteCategory')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.categoriesService.remove(id);
   }
 }

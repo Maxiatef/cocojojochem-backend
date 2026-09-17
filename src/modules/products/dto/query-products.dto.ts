@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
 
 // Admin-only sort keys (sku_*, category_*, variants_*, stock_*, status_*) are
 // accepted by findAllAdmin's plain @Query('sort') param, not by this DTO's
@@ -25,18 +25,16 @@ export type ProductSort =
 // Mirrors + extends the query shape observed on the live cocojojo.com wholesale API
 export class QueryProductsDto {
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  categoryId?: number;
+  @IsUUID('4')
+  categoryId?: string;
 
   @IsOptional()
   @IsString()
   functionSlug?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  certificationId?: number;
+  @IsUUID('4')
+  certificationId?: string;
 
   @IsOptional()
   @IsString()

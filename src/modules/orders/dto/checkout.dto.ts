@@ -1,20 +1,9 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsBoolean,
-  IsEmail,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Min,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min, MinLength, ValidateNested } from 'class-validator';
 
 export class CheckoutItemDto {
-  @IsInt()
-  productVariantId: number;
+  @IsUUID('4')
+  productVariantId: string;
 
   @IsInt()
   @Min(1)

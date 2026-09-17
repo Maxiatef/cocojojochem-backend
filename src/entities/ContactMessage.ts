@@ -8,8 +8,8 @@ export enum ContactMessageStatus {
 
 @Entity('contact_messages')
 export class ContactMessage {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   fullName: string;

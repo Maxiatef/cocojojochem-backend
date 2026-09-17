@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -18,6 +18,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
+import { UUID_RE } from '../../common/uuid';
 
 @ApiTags('Products')
 @ApiBearerAuth('access-token')
@@ -51,7 +52,7 @@ export class ProductsController {
   ) {
     return this.productsService.search(
       query,
-      categoryId ? Number(categoryId) : undefined,
+      categoryId || undefined,
       Number(page),
       Number(limit),
     );
@@ -78,7 +79,7 @@ export class ProductsController {
       Number(page),
       Number(limit),
       search,
-      categoryId ? Number(categoryId) : undefined,
+      categoryId || undefined,
       functionSlug,
       isPublished,
       sort,
@@ -95,7 +96,7 @@ export class ProductsController {
     return this.productsService.getAdminStats();
   }
 
-  // Admin lookup by numeric id — declared before ':slug' so "by-id" isn't
+  // Admin lookup by id — declared before ':slug' so "by-id" isn't
   // A guest's wishlist is a list of product ids in their browser, so it needs
   // to resolve several products in one call. Public visibility rules apply —
   // this returns only what the catalogue already shows anyone.
@@ -104,8 +105,11 @@ export class ProductsController {
     return this.productsService.findPublicByIds(
       (ids || '')
         .split(',')
-        .map((raw) => Number(raw.trim()))
-        .filter((n) => Number.isInteger(n) && n > 0),
+        .map((raw) => raw.trim())
+        // Anything that is not a uuid is dropped rather than passed to the
+        // query: postgres rejects a malformed uuid with a 500, and this is a
+        // public endpoint taking a free-text query string.
+        .filter((raw) => UUID_RE.test(raw)),
     );
   }
 
@@ -116,8 +120,18 @@ export class ProductsController {
   @Get('by-id/:id')
   @RequirePermission('canViewProducts')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findById(@Param('id', ParseIntPipe) id: number) {
+  findById(@Param('id', ParseUUIDPipe) id: string) {
     return this.productsService.findById(id);
+  }
+
+  // Staff lookup by slug, so the admin editor's URL can read as a product name
+  // rather than a uuid. Declared before ':slug' for the same reason as
+  // 'by-id' — otherwise "by-slug" is swallowed as a slug value.
+  @Get('by-slug/:slug')
+  @RequirePermission('canViewProducts')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  findBySlugForStaff(@Param('slug') slug: string) {
+    return this.productsService.findBySlugForStaff(slug);
   }
 
   @Get(':slug')
@@ -142,14 +156,14 @@ export class ProductsController {
   @Patch(':id')
   @RequirePermission('canEditProduct')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateProductDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('canDeleteProduct')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.productsService.remove(id);
   }
 }

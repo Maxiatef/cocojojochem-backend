@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -69,7 +69,7 @@ export class TeamsController {
 
   // --------------------------------------------------- manager: own team
   // Declared before the ':id' routes — 'my-team' would otherwise be swallowed
-  // as an id and rejected by ParseIntPipe.
+  // as an id and rejected by ParseUUIDPipe.
 
   @Get('my-team')
   @RequirePermission('canViewOwnTeam')
@@ -135,43 +135,43 @@ export class TeamsController {
 
   @Get(':id')
   @RequirePermission('canViewTeams')
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.teamsService.findOne(id);
   }
 
   @Get(':id/overview')
   @RequirePermission('canViewTeams')
-  overview(@Param('id', ParseIntPipe) id: number) {
+  overview(@Param('id', ParseUUIDPipe) id: string) {
     return this.teamsService.teamOverviewById(id);
   }
 
   @Get(':id/activity')
   @RequirePermission('canViewTeams')
-  activity(@Param('id', ParseIntPipe) id: number, @Query() query: QueryAuditLogsDto) {
+  activity(@Param('id', ParseUUIDPipe) id: string, @Query() query: QueryAuditLogsDto) {
     return this.teamsService.teamActivity(id, query);
   }
 
   @Get(':id/report')
   @RequirePermission('canViewTeams')
-  report(@Param('id', ParseIntPipe) id: number, @Query() query: TeamReportDto) {
+  report(@Param('id', ParseUUIDPipe) id: string, @Query() query: TeamReportDto) {
     return this.teamsService.teamReport(id, query);
   }
 
   @Patch(':id')
   @RequirePermission('canManageTeams')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTeamDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTeamDto) {
     return this.teamsService.update(id, dto);
   }
 
   @Put(':id/members')
   @RequirePermission('canManageTeams')
-  setMembers(@Param('id', ParseIntPipe) id: number, @Body() dto: SetTeamMembersDto) {
+  setMembers(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetTeamMembersDto) {
     return this.teamsService.setMembers(id, dto.memberIds);
   }
 
   @Delete(':id')
   @RequirePermission('canManageTeams')
-  delete(@Param('id', ParseIntPipe) id: number) {
+  delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.teamsService.delete(id);
   }
 }

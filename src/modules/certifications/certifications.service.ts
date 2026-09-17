@@ -25,14 +25,14 @@ export class CertificationsService {
       .getMany();
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const cert = await this.certificationsRepo.findOne({ where: { id } });
     if (!cert) throw new NotFoundException(`Certification #${id} not found`);
     return cert;
   }
 
   // Products certified by e.g. USDA Organic / Non-GMO / Cruelty-Free
-  async findProducts(id: number, page = 1, limit = 20) {
+  async findProducts(id: string, page = 1, limit = 20) {
     const cert = await this.findOne(id);
 
     const [data, total] = await this.productsRepo

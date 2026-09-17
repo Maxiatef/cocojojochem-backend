@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Put, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Put, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ShippingRateTierKind } from '../../entities';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,7 +32,7 @@ export class ShippingRateTiersController {
   @RequirePermission('canEditShippingRates')
   upsert(
     @Param('kind') kind: string,
-    @Param('zone', ParseIntPipe) zone: number,
+    @Param('zone', ParseUUIDPipe) zone: number,
     @Param('breakpoint') breakpoint: string,
     @Body() dto: UpsertRateTierDto,
   ) {

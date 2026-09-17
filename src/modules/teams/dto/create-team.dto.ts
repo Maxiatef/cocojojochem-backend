@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateTeamDto {
   @IsString()
@@ -12,14 +12,14 @@ export class CreateTeamDto {
   /** Null creates a team with no manager yet — valid, and sometimes the order things happen in. */
   @IsInt()
   @IsOptional()
-  managerId?: number | null;
+  managerId?: string | null;
 
   /**
    * Optional starting roster. Sent as the complete member list, not a delta —
    * see TeamsService.setMembers for why replacing is the right shape here.
    */
   @IsArray()
-  @IsInt({ each: true })
+  @IsUUID('4', { each: true })
   @IsOptional()
-  memberIds?: number[];
+  memberIds?: string[];
 }

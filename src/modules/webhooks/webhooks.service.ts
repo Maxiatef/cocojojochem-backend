@@ -77,7 +77,7 @@ export class WebhooksService {
       });
 
       if (!order) {
-        const pendingCheckoutId = parseInt(session.metadata?.pendingCheckoutId || '', 10);
+        const pendingCheckoutId = session.metadata?.pendingCheckoutId || '';
         if (!pendingCheckoutId) {
           this.logger.warn('Stripe checkout session missing metadata.pendingCheckoutId — ignoring.');
           return { received: true };

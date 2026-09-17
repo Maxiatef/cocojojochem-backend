@@ -5,7 +5,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -43,7 +43,7 @@ export class UsersController {
   }
 
   // Declared before ':id' — 'admin' would otherwise be swallowed as an id
-  // and rejected by ParseIntPipe on that route.
+  // and rejected by ParseUUIDPipe on that route.
   @Get('admin/stats')
   @RequirePermission('canViewUsers')
   @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -60,22 +60,31 @@ export class UsersController {
   @Get(':id')
   @RequirePermission('canViewUsers')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const { passwordHash, ...safeUser } = await this.usersService.findById(id);
     return safeUser;
+  }
+
+  // Declared before ':id/detail', which would otherwise try to parse the
+  // address as a uuid and reject it.
+  @Get('by-email/:email/detail')
+  @RequirePermission('canViewUsers')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  findDetailByEmail(@Param('email') email: string) {
+    return this.usersService.findDetailByEmail(email);
   }
 
   @Get(':id/detail')
   @RequirePermission('canViewUsers')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findDetail(@Param('id', ParseIntPipe) id: number) {
+  findDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findDetail(id);
   }
 
   @Patch(':id/role')
   @RequirePermission('canManageUserRoles')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  updateRole(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
+  updateRole(@Req() req: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRoleDto) {
     // Self-demotion lockout guard: an admin changing their own role away from
     // the one they hold can strip their own access with no way back in.
     if (req.user.id === id && dto.roleId !== req.user.roleId) {
@@ -87,7 +96,7 @@ export class UsersController {
   @Patch(':id')
   @RequirePermission('canEditUser')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  updateUser(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateUserDto) {
+  updateUser(@Req() req: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.updateUser(id, dto);
   }
 
@@ -96,7 +105,7 @@ export class UsersController {
   @Patch(':id/password')
   @RequirePermission('canResetUserPassword')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  setPassword(@Param('id', ParseIntPipe) id: number, @Body() dto: AdminSetPasswordDto) {
+  setPassword(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AdminSetPasswordDto) {
     return this.usersService.setPassword(id, dto.newPassword);
   }
 
@@ -106,7 +115,7 @@ export class UsersController {
   @Post(':id/send-password-reset')
   @RequirePermission('canResetUserPassword')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  sendPasswordReset(@Param('id', ParseIntPipe) id: number) {
+  sendPasswordReset(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.sendPasswordResetLink(id);
   }
 
@@ -115,7 +124,7 @@ export class UsersController {
   @Delete(':id')
   @RequirePermission('canDeleteUser')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  softDelete(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  softDelete(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.softDelete(id, req.user.id);
   }
 
@@ -124,14 +133,14 @@ export class UsersController {
   @Delete(':id/permanent')
   @RequirePermission('canDeleteUser')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  purge(@Param('id', ParseIntPipe) id: number) {
+  purge(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.purge(id);
   }
 
   @Patch(':id/restore')
   @RequirePermission('canEditUser')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  restore(@Param('id', ParseIntPipe) id: number) {
+  restore(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.restore(id);
   }
 
@@ -140,7 +149,7 @@ export class UsersController {
   @Post(':id/revoke-sessions')
   @RequirePermission('canResetUserPassword')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  async revokeSessions(@Param('id', ParseIntPipe) id: number) {
+  async revokeSessions(@Param('id', ParseUUIDPipe) id: string) {
     await this.usersService.findById(id); // 404s on an unknown id
     const revokedSessions = await this.usersService.revokeAllSessions(id);
     return { success: true, revokedSessions };

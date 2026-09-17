@@ -23,7 +23,7 @@ export class SeoPagesService {
     return this.seoPagesRepo.findOne({ where: { path } });
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const page = await this.seoPagesRepo.findOne({ where: { id } });
     if (!page) throw new NotFoundException(`SEO page #${id} not found`);
     return page;
@@ -74,7 +74,7 @@ export class SeoPagesService {
     return saved;
   }
 
-  async update(id: number, dto: UpdateSeoPageDto) {
+  async update(id: string, dto: UpdateSeoPageDto) {
     const page = await this.findOne(id);
     Object.assign(page, dto);
     const saved = await this.seoPagesRepo.save(page);
@@ -82,7 +82,7 @@ export class SeoPagesService {
     return saved;
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const page = await this.findOne(id);
     await this.seoPagesRepo.remove(page);
     this.logger.log(`SEO page deleted: ${page.path} (id=${id})`);

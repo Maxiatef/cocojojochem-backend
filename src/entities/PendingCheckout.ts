@@ -9,11 +9,11 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeor
 // usage aren't touched.
 @Entity('pending_checkouts')
 export class PendingCheckout {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column({ type: 'int', nullable: true })
-  userId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   guestEmail: string | null;
@@ -38,8 +38,8 @@ export class PendingCheckout {
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   taxAmount: string;
 
-  @Column({ type: 'int', nullable: true })
-  couponId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  couponId: string | null;
 
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   couponAmount: string;

@@ -9,7 +9,7 @@ export interface CheckoutSessionLineItemInput {
 }
 
 export interface CreateCheckoutSessionInput {
-  pendingCheckoutId: number;
+  pendingCheckoutId: string;
   items: CheckoutSessionLineItemInput[];
   shippingCost: number;
   taxAmount: number;

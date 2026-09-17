@@ -16,11 +16,11 @@ export enum DocType {
 
 @Entity('product_documents')
 export class ProductDocument {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @ManyToOne(() => Product, (product) => product.documents, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })
@@ -38,8 +38,8 @@ export class ProductDocument {
   // Set only when type is CERTIFICATE. ON DELETE SET NULL rather than CASCADE:
   // deleting a certification from the catalogue must not silently delete the
   // PDF proving a product held it — the file just stops being linked.
-  @Column({ type: 'int', nullable: true })
-  certificationId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  certificationId: string | null;
 
   @ManyToOne(() => Certification, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'certificationId' })

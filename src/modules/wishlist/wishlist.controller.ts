@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -40,7 +40,7 @@ export class WishlistController {
   }
 
   @Post('merge')
-  mergeGuestList(@Req() req: any, @Body('productIds') productIds: number[]) {
+  mergeGuestList(@Req() req: any, @Body('productIds') productIds: string[]) {
     return this.wishlistService.mergeGuestList(req.user.id, productIds);
   }
 
@@ -53,7 +53,7 @@ export class WishlistController {
   // saved product ids (that is all a guest list is), so it never knows a row
   // id to send.
   @Delete('items/:productId')
-  removeItem(@Req() req: any, @Param('productId', ParseIntPipe) productId: number) {
+  removeItem(@Req() req: any, @Param('productId', ParseUUIDPipe) productId: string) {
     return this.wishlistService.removeItem(req.user.id, productId);
   }
 

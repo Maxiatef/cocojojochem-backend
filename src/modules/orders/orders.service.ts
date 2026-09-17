@@ -44,7 +44,7 @@ const DEFAULT_WHOLESALE_MINIMUM = 250;
 // PendingCheckout.itemsJson and turned back into a real OrderItem only once
 // Stripe confirms payment (see finalizeCheckoutFromPendingId).
 interface PendingCheckoutItemSnapshot {
-  productVariantId: number;
+  productVariantId: string;
   productName: string;
   variantLabel: string;
   sku: string;
@@ -408,7 +408,7 @@ export class OrdersService {
     couponCode: string | undefined,
     email: string | undefined,
     subtotal: number,
-    cartItems: { productId?: number; variantId?: number; categoryId?: number; quantity: number; price: number }[],
+    cartItems: { productId?: string; variantId?: string; categoryId?: string; quantity: number; price: number }[],
   ) {
     if (!couponCode) return null;
     const result = await this.couponsService.validateCoupon({
@@ -439,7 +439,7 @@ export class OrdersService {
   private totalsPerVariant(
     lines: { variant: ProductVariant; productName: string; quantity: number }[],
   ): { variant: ProductVariant; productName: string; total: number }[] {
-    const totals = new Map<number, { variant: ProductVariant; productName: string; total: number }>();
+    const totals = new Map<string, { variant: ProductVariant; productName: string; total: number }>();
     for (const line of lines) {
       const existing = totals.get(line.variant.id);
       if (existing) existing.total += line.quantity;
@@ -549,7 +549,7 @@ export class OrdersService {
 
     const variantIds = (items || [])
       .map((i) => i.productVariantId)
-      .filter((id): id is number => id != null);
+      .filter((id): id is string => id != null);
     if (variantIds.length === 0) return;
 
     const variants = await repo.find({ where: { id: In(variantIds) } });
@@ -558,7 +558,7 @@ export class OrdersService {
     // Summed per variant first: an order can legitimately carry the same
     // variant on more than one line, and updating per line would only
     // restore the last one.
-    const quantityByVariant = new Map<number, number>();
+    const quantityByVariant = new Map<string, number>();
     for (const item of items || []) {
       if (item.productVariantId == null) continue;
       quantityByVariant.set(
@@ -585,7 +585,7 @@ export class OrdersService {
     }
   }
 
-  findAllForUser(userId: number) {
+  findAllForUser(userId: string) {
     return this.ordersRepo.find({
       where: { userId },
       relations: ['items'],
@@ -593,7 +593,7 @@ export class OrdersService {
     });
   }
 
-  async findOne(userId: number, id: number) {
+  async findOne(userId: string, id: string) {
     const order = await this.ordersRepo.findOne({ where: { id, userId }, relations: ['items'] });
     if (!order) throw new NotFoundException(`Order #${id} not found`);
     return order;
@@ -605,7 +605,7 @@ export class OrdersService {
   // hands the customer off to Stripe. If they never pay, or payment fails,
   // nothing was ever "ordered": no phantom PENDING order, no stock
   // decremented, no cart cleared, no coupon usage counted.
-  async checkout(userId: number | null, dto: CheckoutDto) {
+  async checkout(userId: string | null, dto: CheckoutDto) {
     const { shippingAddress, notes } = dto;
 
     if (userId) {
@@ -755,7 +755,7 @@ export class OrdersService {
     // the Stripe redirect. Ties the pending checkout (and eventually the
     // real order) to the new account.
     let accessToken: string | undefined;
-    let linkedUserId: number | null = null;
+    let linkedUserId: string | null = null;
 
     if (dto.createAccount) {
       if (!dto.password) {
@@ -827,7 +827,7 @@ export class OrdersService {
   // duplicate webhook delivery is a safe no-op; the caller should also check
   // for an existing Order by stripeCheckoutSessionId first.
   async finalizeCheckoutFromPendingId(
-    pendingCheckoutId: number,
+    pendingCheckoutId: string,
     stripeCheckoutSessionId: string,
     stripePaymentIntentId?: string | null,
   ): Promise<Order | null> {
@@ -1010,7 +1010,7 @@ export class OrdersService {
    * rollback, customer email, refund-required alert). Duplicating that here
    * would be the obvious way for the two paths to drift apart.
    */
-  async cancelByCustomer(userId: number, orderId: number) {
+  async cancelByCustomer(userId: string, orderId: string) {
     const order = await this.ordersRepo.findOne({ where: { id: orderId, userId } });
     if (!order) throw new NotFoundException(`Order #${orderId} not found`);
 
@@ -1028,7 +1028,7 @@ export class OrdersService {
     return this.updateStatus(orderId, OrderStatus.CANCELLED);
   }
 
-  async updateStatus(id: number, status: OrderStatus) {
+  async updateStatus(id: string, status: OrderStatus) {
     const order = await this.ordersRepo.findOne({ where: { id }, relations: ['items', 'user'] });
     if (!order) throw new NotFoundException(`Order #${id} not found`);
     const previousStatus = order.status;
@@ -1105,7 +1105,7 @@ export class OrdersService {
     return saved;
   }
 
-  async updateTracking(id: number, dto: UpdateTrackingDto) {
+  async updateTracking(id: string, dto: UpdateTrackingDto) {
     const order = await this.ordersRepo.findOne({ where: { id } });
     if (!order) throw new NotFoundException(`Order #${id} not found`);
     applyTrackingNumber(order, dto.trackingNumber, dto.carrierCode);
@@ -1131,7 +1131,7 @@ export class OrdersService {
    * configured or refuses the shipment, the order simply has no tracking yet,
    * which is the truthful state.
    */
-  async createShipmentForOrder(orderId: number): Promise<void> {
+  async createShipmentForOrder(orderId: string): Promise<void> {
     // Items are needed for the parcel weight, user for the recipient name —
     // the previous bare findOne loaded neither, which is part of why the
     // parcel had to be hardcoded.
@@ -1148,7 +1148,7 @@ export class OrdersService {
     // bought rather than a hardcoded 1lb.
     const variantIds = (order.items || [])
       .map((item) => item.productVariantId)
-      .filter((id): id is number => id != null);
+      .filter((id): id is string => id != null);
     const variants = variantIds.length
       ? await this.variantsRepo.find({ where: { id: In(variantIds) } })
       : [];
@@ -1184,7 +1184,7 @@ export class OrdersService {
    * orders.module.ts and the constructor injection below, and uncomment the
    * call in WebhooksService.handleStripeEvent.
    *
-   * async pushOrderToShipStation(orderId: number): Promise<void> {
+   * async pushOrderToShipStation(orderId: string): Promise<void> {
    *   const order = await this.ordersRepo.findOne({
    *     where: { id: orderId },
    *     relations: ['items', 'user'],
@@ -1256,7 +1256,7 @@ export class OrdersService {
    *    ids: enough to answer "where is my order", nothing that would make
    *    this worth attacking.
    */
-  async trackAsGuest(orderId: number, email: string) {
+  async trackAsGuest(orderId: string, email: string) {
     const order = await this.ordersRepo.findOne({
       where: { id: orderId },
       relations: ['items', 'user'],
@@ -1296,7 +1296,7 @@ export class OrdersService {
     };
   }
 
-  async getTrackingCheckpoints(orderId: number): Promise<TrackingResult> {
+  async getTrackingCheckpoints(orderId: string): Promise<TrackingResult> {
     const order = await this.ordersRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException(`Order #${orderId} not found`);
 

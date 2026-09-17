@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -82,7 +82,7 @@ export class CouponsController {
   @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  getAnalyticsForCoupon(@Param('id', ParseIntPipe) id: number) {
+  getAnalyticsForCoupon(@Param('id', ParseUUIDPipe) id: string) {
     return this.couponsService.getAnalyticsForCoupon(id);
   }
 
@@ -90,7 +90,7 @@ export class CouponsController {
   @RequirePermission('canViewCoupons')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.couponsService.findOne(id);
   }
 
@@ -106,7 +106,7 @@ export class CouponsController {
   @RequirePermission('canEditCoupon')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCouponDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCouponDto) {
     return this.couponsService.update(id, dto);
   }
 
@@ -114,7 +114,7 @@ export class CouponsController {
   @RequirePermission('canDeleteCoupon')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.couponsService.remove(id);
   }
 }

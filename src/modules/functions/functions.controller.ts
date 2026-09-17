@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -84,14 +84,14 @@ export class FunctionsController {
   @Patch(':id')
   @RequirePermission('canEditFunction')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateFunctionDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateFunctionDto) {
     return this.functionsService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('canDeleteFunction')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.functionsService.remove(id);
   }
 }

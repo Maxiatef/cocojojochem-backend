@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { QuoteListService } from './quote-list.service';
@@ -33,12 +33,12 @@ export class QuoteListController {
   }
 
   @Patch('items/:id')
-  updateItem(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateQuoteListItemDto) {
+  updateItem(@Req() req: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateQuoteListItemDto) {
     return this.quoteListService.updateItemQuantity(req.user.id, id, dto.quantity);
   }
 
   @Delete('items/:id')
-  removeItem(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  removeItem(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.quoteListService.removeItem(req.user.id, id);
   }
 

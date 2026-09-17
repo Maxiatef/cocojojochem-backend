@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query,
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query,
   UseGuards,
 } from '@nestjs/common';
 import { IsOptional, IsString } from 'class-validator';
@@ -29,7 +29,7 @@ export class CertificationsController {
 
   @Get(':id/products')
   findProducts(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {

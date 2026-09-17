@@ -26,7 +26,7 @@ export class CompaniesService {
       .getMany();
   }
 
-  async findById(id: number) {
+  async findById(id: string) {
     const company = await this.companiesRepo.findOne({ where: { id }, relations: ['users'] });
     if (!company) throw new NotFoundException(`Company #${id} not found`);
     // Strip passwordHash before this ever reaches a client — findOne's
@@ -45,7 +45,7 @@ export class CompaniesService {
     return saved;
   }
 
-  async update(id: number, data: Partial<Company>) {
+  async update(id: string, data: Partial<Company>) {
     const company = await this.companiesRepo.findOne({ where: { id } });
     if (!company) throw new NotFoundException(`Company #${id} not found`);
     Object.assign(company, data);
@@ -55,7 +55,7 @@ export class CompaniesService {
   }
 
   // Every order placed by any user belonging to this company — joined through User -> Order.
-  async findOrders(companyId: number) {
+  async findOrders(companyId: string) {
     await this.findById(companyId);
     const orders = await this.ordersRepo
       .createQueryBuilder('order')
@@ -75,7 +75,7 @@ export class CompaniesService {
     return orders;
   }
 
-  async findQuoteRequests(companyId: number) {
+  async findQuoteRequests(companyId: string) {
     // Left join, not inner — a quote request can be tied to this company by
     // companyId alone (e.g. companyName typed on a guest submission) with no
     // linked userId, and those must still show up in the list.

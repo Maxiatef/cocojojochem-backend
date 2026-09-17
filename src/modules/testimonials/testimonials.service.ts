@@ -28,7 +28,7 @@ export class TestimonialsService {
     return this.testimonialsRepo.find({ order: { sortOrder: 'ASC', id: 'ASC' } });
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const testimonial = await this.testimonialsRepo.findOne({ where: { id } });
     if (!testimonial) throw new NotFoundException(`Testimonial #${id} not found`);
     return testimonial;
@@ -47,7 +47,7 @@ export class TestimonialsService {
     return this.testimonialsRepo.save(testimonial);
   }
 
-  async update(id: number, dto: UpdateTestimonialDto) {
+  async update(id: string, dto: UpdateTestimonialDto) {
     const testimonial = await this.findOne(id);
 
     // Assigned field by field rather than Object.assign(dto), so an unknown
@@ -64,7 +64,7 @@ export class TestimonialsService {
     return this.testimonialsRepo.save(testimonial);
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const testimonial = await this.findOne(id);
     // remove(), not delete() — delete() fires no subscriber event, so the
     // deletion would be invisible to the audit log.

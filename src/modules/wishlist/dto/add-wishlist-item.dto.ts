@@ -1,6 +1,6 @@
-import { IsInt } from 'class-validator';
+import { IsUUID } from 'class-validator';
 
 export class AddWishlistItemDto {
-  @IsInt()
-  productId: number;
+  @IsUUID('4')
+  productId: string;
 }

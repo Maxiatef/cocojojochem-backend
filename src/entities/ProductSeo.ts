@@ -3,11 +3,11 @@ import { Product } from './Product';
 
 @Entity('product_seo')
 export class ProductSeo {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column({ unique: true })
-  productId: number;
+  @Column({ type: 'uuid', unique: true })
+  productId: string;
 
   @OneToOne(() => Product, (product) => product.seo, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })

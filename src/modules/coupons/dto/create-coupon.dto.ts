@@ -68,27 +68,27 @@ export class CreateCouponDto {
 
   @IsOptional()
   @IsArray()
-  excludedCategoryIds?: number[];
+  excludedCategoryIds?: string[];
 
   @IsOptional()
   @IsArray()
-  excludedProductIds?: number[];
+  excludedProductIds?: string[];
 
   @IsOptional()
   @IsArray()
-  excludedVariantIds?: number[];
+  excludedVariantIds?: string[];
 
   @IsOptional()
   @IsArray()
-  includedCategoryIds?: number[];
+  includedCategoryIds?: string[];
 
   @IsOptional()
   @IsArray()
-  includedProductIds?: number[];
+  includedProductIds?: string[];
 
   @IsOptional()
   @IsArray()
-  includedVariantIds?: number[];
+  includedVariantIds?: string[];
 
   @IsOptional()
   @IsInt()

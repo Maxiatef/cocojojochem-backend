@@ -21,15 +21,15 @@ export class CreateBulkSaleDto {
 
   @IsOptional()
   @IsArray()
-  categoryIds?: number[];
+  categoryIds?: string[];
 
   @IsOptional()
   @IsArray()
-  productIds?: number[];
+  productIds?: string[];
 
   @IsOptional()
   @IsArray()
-  variantIds?: number[];
+  variantIds?: string[];
 
   @IsOptional()
   @IsBoolean()

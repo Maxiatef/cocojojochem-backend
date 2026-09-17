@@ -3,7 +3,7 @@ import {
   Controller,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   UseGuards,
 } from '@nestjs/common';
@@ -29,25 +29,25 @@ export class CompaniesController {
 
   @Get(':id')
   @RequirePermission('canViewCompanies')
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.companiesService.findById(id);
   }
 
   @Patch(':id')
   @RequirePermission('canEditCompany')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCompanyDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.update(id, dto);
   }
 
   @Get(':id/orders')
   @RequirePermission('canViewCompanies')
-  findOrders(@Param('id', ParseIntPipe) id: number) {
+  findOrders(@Param('id', ParseUUIDPipe) id: string) {
     return this.companiesService.findOrders(id);
   }
 
   @Get(':id/quote-requests')
   @RequirePermission('canViewCompanies')
-  findQuoteRequests(@Param('id', ParseIntPipe) id: number) {
+  findQuoteRequests(@Param('id', ParseUUIDPipe) id: string) {
     return this.companiesService.findQuoteRequests(id);
   }
 }

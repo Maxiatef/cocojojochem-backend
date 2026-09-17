@@ -29,8 +29,8 @@ export enum ProductVisibility {
 
 @Entity('products')
 export class Product {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   name: string;
@@ -60,8 +60,8 @@ export class Product {
   @Column({ type: 'varchar', nullable: true })
   imageUrl: string | null;
 
-  @Column()
-  categoryId: number;
+  @Column({ type: 'uuid' })
+  categoryId: string;
 
   @ManyToOne(() => Category, (category) => category.products)
   @JoinColumn({ name: 'categoryId' })

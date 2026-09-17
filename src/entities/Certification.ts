@@ -3,8 +3,8 @@ import { Product } from './Product';
 
 @Entity('certifications')
 export class Certification {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ unique: true })
   name: string; // USDA Organic, GMP, cGMP Compliant, Non-GMO, Cruelty-Free

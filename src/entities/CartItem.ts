@@ -10,18 +10,18 @@ export enum PurchaseType {
 // Mirrors the real cocojojo.com localStorage cart item shape.
 @Entity('cart_items')
 export class CartItem {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  cartId: number;
+  @Column({ type: 'uuid' })
+  cartId: string;
 
   @ManyToOne(() => Cart, (cart) => cart.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'cartId' })
   cart: Cart;
 
-  @Column()
-  productVariantId: number;
+  @Column({ type: 'uuid' })
+  productVariantId: string;
 
   @ManyToOne(() => ProductVariant, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productVariantId' })

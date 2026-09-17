@@ -30,8 +30,8 @@ export enum UserStatus {
 
 @Entity('users')
 export class User {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ unique: true })
   email: string;
@@ -56,8 +56,8 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   phone: string | null;
 
-  @Column({ type: 'int', nullable: true })
-  roleId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  roleId: string | null;
 
   @ManyToOne(() => Role, (role) => role.users, { nullable: true })
   @JoinColumn({ name: 'roleId' })
@@ -76,8 +76,8 @@ export class User {
   // Staff grouping. Null for customers and for staff who are in no team.
   // ON DELETE SET NULL so deleting a team empties it rather than deleting the
   // people in it.
-  @Column({ type: 'int', nullable: true })
-  teamId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  teamId: string | null;
 
   @ManyToOne(() => Team, (team) => team.members, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'teamId' })
@@ -90,8 +90,8 @@ export class User {
   @OneToMany(() => Team, (team) => team.manager)
   managedTeams: Team[];
 
-  @Column({ type: 'int', nullable: true })
-  companyId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  companyId: string | null;
 
   @ManyToOne(() => Company, (company) => company.users, { nullable: true })
   @JoinColumn({ name: 'companyId' })

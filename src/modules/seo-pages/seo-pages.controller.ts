@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -54,7 +54,7 @@ export class SeoPagesController {
   @RequirePermission('canViewSeoPages')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.seoPagesService.findOne(id);
   }
 
@@ -70,7 +70,7 @@ export class SeoPagesController {
   @RequirePermission('canEditSeoPage')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSeoPageDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSeoPageDto) {
     return this.seoPagesService.update(id, dto);
   }
 
@@ -78,7 +78,7 @@ export class SeoPagesController {
   @RequirePermission('canDeleteSeoPage')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.seoPagesService.remove(id);
   }
 }

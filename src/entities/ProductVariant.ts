@@ -19,11 +19,11 @@ export enum StockStatus {
 // Matches the real cocojojo.com variant shape, e.g. "1 Gallon" / "1 Pail" / "1 Drum" / "25 KG"
 @Entity('product_variants')
 export class ProductVariant {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @ManyToOne(() => Product, (product) => product.variants, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })

@@ -31,7 +31,7 @@ export interface SeoCheck {
 
 export interface ProductSeoInput {
   /** Excluded from the uniqueness checks so a product never clashes with itself. */
-  productId?: number | null;
+  productId?: string | null;
   name: string;
   slug: string;
   shortDescription?: string | null;

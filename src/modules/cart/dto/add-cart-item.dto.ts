@@ -1,9 +1,9 @@
-import { IsEnum, IsInt, IsOptional, IsPositive } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsPositive, IsUUID } from 'class-validator';
 import { PurchaseType } from '../../../entities';
 
 export class AddCartItemDto {
-  @IsInt()
-  productVariantId: number;
+  @IsUUID('4')
+  productVariantId: string;
 
   @IsInt()
   @IsPositive()

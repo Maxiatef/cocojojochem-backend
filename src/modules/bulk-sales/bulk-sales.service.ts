@@ -5,11 +5,11 @@ import { BulkSaleDiscount, ProductVariant } from '../../entities';
 import { CreateBulkSaleDto } from './dto/create-bulk-sale.dto';
 import { UpdateBulkSaleDto } from './dto/update-bulk-sale.dto';
 
-function parseIds(value: string | null): number[] {
+function parseIds(value: string | null): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(Number) : [];
+    return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
   }
@@ -30,7 +30,7 @@ export class BulkSalesService {
     return this.bulkSalesRepo.find({ order: { createdAt: 'DESC' } });
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const record = await this.bulkSalesRepo.findOne({ where: { id } });
     if (!record) throw new NotFoundException(`Bulk sale discount #${id} not found`);
     return record;
@@ -39,11 +39,11 @@ export class BulkSalesService {
   // Resolves the full set of target variants: direct variantIds, plus every
   // variant belonging to productIds, plus every variant of every product in categoryIds.
   private async resolveTargetVariants(
-    categoryIds: number[],
-    productIds: number[],
-    variantIds: number[],
+    categoryIds: string[],
+    productIds: string[],
+    variantIds: string[],
   ): Promise<ProductVariant[]> {
-    const variantMap = new Map<number, ProductVariant>();
+    const variantMap = new Map<string, ProductVariant>();
 
     if (variantIds.length) {
       const direct = await this.variantsRepo.find({ where: { id: In(variantIds) } });
@@ -88,9 +88,9 @@ export class BulkSalesService {
   }
 
   private async removeSalesFromTargets(
-    categoryIds: number[],
-    productIds: number[],
-    variantIds: number[],
+    categoryIds: string[],
+    productIds: string[],
+    variantIds: string[],
   ) {
     const targets = await this.resolveTargetVariants(categoryIds, productIds, variantIds);
     if (!targets.length) return;
@@ -119,7 +119,7 @@ export class BulkSalesService {
     return saved;
   }
 
-  async update(id: number, dto: UpdateBulkSaleDto) {
+  async update(id: string, dto: UpdateBulkSaleDto) {
     const record = await this.findOne(id);
 
     // Remove sale pricing from the OLD target set before re-resolving.
@@ -147,7 +147,7 @@ export class BulkSalesService {
     return saved;
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const record = await this.findOne(id);
     await this.removeSalesFromTargets(
       parseIds(record.categoryIds),

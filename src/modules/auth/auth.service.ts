@@ -71,7 +71,7 @@ export class AuthService {
       throw new ConflictException('Email already registered');
     }
 
-    let companyId: number | undefined;
+    let companyId: string | undefined;
     if (dto.companyName) {
       const company = await this.companiesService.create({
         name: dto.companyName,
@@ -111,9 +111,9 @@ export class AuthService {
     // actorRole column. Every caller loads it (findByEmail, findById and
     // authLookup all join the relation).
     user: {
-      id: number;
+      id: string;
       email: string;
-      roleId: number | null;
+      roleId: string | null;
       role?: { name: string } | null;
     } | null,
     attemptedEmail: string,
@@ -183,7 +183,7 @@ export class AuthService {
     return this.buildToken(user.id, user.email, user.roleId);
   }
 
-  async changePassword(userId: number, dto: ChangePasswordDto) {
+  async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.usersService.findById(userId);
     if (!user.passwordHash) {
       throw new BadRequestException('This account has no password set');
@@ -414,7 +414,7 @@ export class AuthService {
     return hashToken(rawToken);
   }
 
-  private async buildToken(sub: number, email: string, roleId: number | null) {
+  private async buildToken(sub: string, email: string, roleId: string | null) {
     const accessToken = this.jwtService.sign(
       { sub, email, roleId },
       { expiresIn: process.env.JWT_EXPIRES_IN || '15m' },

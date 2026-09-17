@@ -3,18 +3,18 @@ import { QuoteRequest } from './QuoteRequest';
 
 @Entity('quote_request_items')
 export class QuoteRequestItem {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  quoteRequestId: number;
+  @Column({ type: 'uuid' })
+  quoteRequestId: string;
 
   @ManyToOne(() => QuoteRequest, (qr) => qr.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'quoteRequestId' })
   quoteRequest: QuoteRequest;
 
-  @Column({ type: 'int', nullable: true })
-  productId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  productId: string | null;
 
   @Column()
   productName: string; // snapshot in case product is later deleted

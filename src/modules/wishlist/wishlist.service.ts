@@ -13,7 +13,7 @@ export class WishlistService {
     private readonly productsRepo: Repository<Product>,
   ) {}
 
-  private rows(userId: number) {
+  private rows(userId: string) {
     return this.repo.find({ where: { userId }, order: { createdAt: 'DESC' } });
   }
 
@@ -25,7 +25,7 @@ export class WishlistService {
    * silently deleting someone's saved item because of a staff action they
    * cannot see would be the wrong trade.
    */
-  async getItems(userId: number) {
+  async getItems(userId: string) {
     const rows = await this.rows(userId);
     if (rows.length === 0) return [];
 
@@ -54,7 +54,7 @@ export class WishlistService {
       .filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
-  async getIds(userId: number): Promise<number[]> {
+  async getIds(userId: string): Promise<string[]> {
     const rows = await this.rows(userId);
     return rows.map((r) => r.productId);
   }
@@ -66,7 +66,7 @@ export class WishlistService {
    * every page load, and a count that dipped because a product was briefly
    * unpublished would read as "the site lost my saves".
    */
-  async getSummary(userId: number) {
+  async getSummary(userId: string) {
     const count = await this.repo.count({ where: { userId } });
     return { count };
   }
@@ -76,7 +76,7 @@ export class WishlistService {
    * error — the client treats this as a toggle, and a 409 on "add" would make
    * a double-click look like a failure.
    */
-  async addItem(userId: number, productId: number) {
+  async addItem(userId: string, productId: string) {
     const product = await this.productsRepo.findOne({ where: { id: productId } });
     if (!product) throw new NotFoundException(`Product #${productId} not found`);
 
@@ -95,7 +95,7 @@ export class WishlistService {
    * rather than failing the merge — this runs during login, and a stale id in
    * localStorage must not be able to block signing in.
    */
-  async mergeGuestList(userId: number, productIds: number[]) {
+  async mergeGuestList(userId: string, productIds: string[]) {
     const ids = Array.from(new Set(productIds || [])).filter((id) => Number.isInteger(id));
     if (ids.length === 0) return this.getSummary(userId);
 
@@ -114,7 +114,7 @@ export class WishlistService {
     return this.getSummary(userId);
   }
 
-  async removeItem(userId: number, productId: number) {
+  async removeItem(userId: string, productId: string) {
     const item = await this.repo.findOne({ where: { userId, productId } });
     // Removing something already gone is the state the caller wanted, so this
     // succeeds quietly rather than erroring on a double-click.
@@ -122,7 +122,7 @@ export class WishlistService {
     return this.getSummary(userId);
   }
 
-  async clear(userId: number) {
+  async clear(userId: string) {
     const items = await this.rows(userId);
     if (items.length) await this.repo.remove(items);
     return { count: 0 };

@@ -11,18 +11,18 @@ import { Order } from './Order';
 
 @Entity('coupon_usages')
 export class CouponUsage {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  couponId: number;
+  @Column({ type: 'uuid' })
+  couponId: string;
 
   @ManyToOne(() => Coupon, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'couponId' })
   coupon: Coupon;
 
-  @Column({ type: 'int', nullable: true, unique: true })
-  orderId: number | null;
+  @Column({ type: 'uuid', nullable: true, unique: true })
+  orderId: string | null;
 
   @ManyToOne(() => Order, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'orderId' })

@@ -109,7 +109,7 @@ export class UsersService {
   // would otherwise issue a second query per request. Reading it here also
   // keeps the existing property that a role or permission change takes effect
   // on the very next request instead of when the access token expires.
-  authLookup(id: number) {
+  authLookup(id: string) {
     return this.usersRepo.findOne({
       where: { id },
       select: ['id', 'email', 'roleId', 'status', 'teamId'],
@@ -117,7 +117,7 @@ export class UsersService {
     });
   }
 
-  async findById(id: number) {
+  async findById(id: string) {
     const user = await this.usersRepo.findOne({
       where: { id },
       relations: ['company', 'role', 'team'],
@@ -131,7 +131,7 @@ export class UsersService {
     return this.usersRepo.save(user);
   }
 
-  async updateProfile(id: number, data: Partial<Pick<User, 'fullName' | 'phone'>>) {
+  async updateProfile(id: string, data: Partial<Pick<User, 'fullName' | 'phone'>>) {
     const user = await this.findById(id);
     Object.assign(user, data);
     return this.usersRepo.save(user);
@@ -180,7 +180,7 @@ export class UsersService {
     }
     // Recycled users are hidden unless explicitly asked for, so the Recycle
     // Bin never leaks into the normal list — and any other caller that lists
-    // users (e.g. a staff picker hitting ?roleId=2) gets that for free.
+    // users (e.g. a staff picker hitting ?roleId=…) gets that for free.
     // Callers that need them, like the Roles page's "who has this role"
     // dialog, ask with ?status=ACTIVE,DELETED.
     if (query.status) {
@@ -228,7 +228,24 @@ export class UsersService {
     return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
-  async findDetail(id: number) {
+  /**
+   * The same detail view, reached by email so the admin URL is readable.
+   *
+   * Case-insensitive because addresses are stored however they were typed —
+   * an admin pasting "Admin@…" from an email client should not get a 404 for
+   * a row stored as "admin@…".
+   */
+  async findDetailByEmail(email: string) {
+    const user = await this.usersRepo
+      .createQueryBuilder('user')
+      .select('user.id')
+      .where('LOWER(user.email) = LOWER(:email)', { email })
+      .getOne();
+    if (!user) throw new NotFoundException(`User "${email}" not found`);
+    return this.findDetail(user.id);
+  }
+
+  async findDetail(id: string) {
     const { passwordHash, ...user } = await this.findById(id);
     // Full order history, not just a recent slice — the admin edit page
     // shows every order's full detail (items, shipping, tracking, totals)
@@ -264,7 +281,7 @@ export class UsersService {
   // Admin: full profile update — fullName/email/phone/role/companyId.
   // Self-demotion is blocked one level up in the controller (needs the
   // requesting admin's own id, which the service doesn't have).
-  async updateUser(id: number, dto: UpdateUserDto) {
+  async updateUser(id: string, dto: UpdateUserDto) {
     const user = await this.findById(id);
 
     if (dto.email && dto.email !== user.email) {
@@ -304,7 +321,7 @@ export class UsersService {
     return safeUser;
   }
 
-  async setPassword(id: number, newPassword: string) {
+  async setPassword(id: string, newPassword: string) {
     const user = await this.findById(id);
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     await this.usersRepo.save(user);
@@ -325,7 +342,7 @@ export class UsersService {
   // one, change their role first. Now that roles are dynamic, "admin" means
   // "holds a role that can itself delete users" rather than a fixed enum value,
   // so a custom role with that power is protected too.
-  private assertDeletable(user: User, actingAdminId?: number) {
+  private assertDeletable(user: User, actingAdminId?: string) {
     if (user.role?.permissions?.canDeleteUser === true) {
       throw new ForbiddenException(
         'Accounts that can manage users cannot be deleted. Change the role first.',
@@ -342,7 +359,7 @@ export class UsersService {
   // Moves a user to the Recycle Bin: they can no longer log in, and existing
   // sessions are killed. Reversible — cart, quote list and quote requests are
   // deliberately left untouched so a restore is lossless.
-  async softDelete(id: number, actingAdminId: number) {
+  async softDelete(id: string, actingAdminId: string) {
     const user = await this.findById(id);
     this.assertDeletable(user, actingAdminId);
 
@@ -368,7 +385,7 @@ export class UsersService {
     return { success: true, alreadyDeleted: false, revokedSessions };
   }
 
-  async restore(id: number) {
+  async restore(id: string) {
     const user = await this.findById(id);
     if (user.status === UserStatus.ACTIVE) {
       return { success: true, alreadyActive: true };
@@ -385,7 +402,7 @@ export class UsersService {
   // non-admin: order history survives because the customer's details are
   // copied onto the order's guest columns before detaching, so revenue
   // reporting and order emails are unaffected.
-  async purge(id: number) {
+  async purge(id: string) {
     const user = await this.findById(id);
     this.assertDeletable(user);
 
@@ -453,7 +470,7 @@ export class UsersService {
   // Revokes every live refresh token for a user, signing them out of every
   // device. Access tokens already issued stay valid until they expire (15m
   // by default) — they're stateless JWTs with nothing to revoke.
-  async revokeAllSessions(userId: number): Promise<number> {
+  async revokeAllSessions(userId: string): Promise<number> {
     const result = await this.refreshTokenRepo.update(
       { userId, revokedAt: IsNull() },
       { revokedAt: new Date() },
@@ -491,7 +508,7 @@ export class UsersService {
   // existing PasswordResetRequest table and the existing
   // POST /auth/reset-password endpoint rather than introducing a second,
   // parallel reset mechanism to keep secure.
-  async sendPasswordResetLink(id: number) {
+  async sendPasswordResetLink(id: string) {
     const user = await this.findById(id);
 
     const rawLinkToken = crypto.randomBytes(32).toString('hex');
@@ -542,7 +559,7 @@ export class UsersService {
     return { success: true, email: user.email, emailSent };
   }
 
-  async updateRole(id: number, roleId: number | null) {
+  async updateRole(id: string, roleId: string | null) {
     const user = await this.findById(id);
     user.roleId = roleId;
     const { passwordHash, ...safeUser } = await this.usersRepo.save(user);

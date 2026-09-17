@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString()
@@ -16,8 +16,8 @@ export class CreateCategoryDto {
   imageUrl?: string;
 
   @IsOptional()
-  @IsInt()
-  parentId?: number;
+  @IsUUID('4')
+  parentId?: string;
 
   @IsOptional()
   @IsInt()

@@ -11,17 +11,17 @@ export class QuoteListService {
     private readonly repo: Repository<QuoteListItem>,
   ) {}
 
-  getItems(userId: number) {
+  getItems(userId: string) {
     return this.repo.find({ where: { userId }, order: { createdAt: 'ASC' } });
   }
 
-  async getSummary(userId: number) {
+  async getSummary(userId: string) {
     const items = await this.getItems(userId);
     const count = items.reduce((sum, i) => sum + i.quantity, 0);
     return { count, items };
   }
 
-  addItem(userId: number, dto: AddQuoteListItemDto) {
+  addItem(userId: string, dto: AddQuoteListItemDto) {
     const item = this.repo.create({
       userId,
       productId: dto.productId,
@@ -34,7 +34,7 @@ export class QuoteListService {
     return this.repo.save(item);
   }
 
-  async updateItemQuantity(userId: number, itemId: number, quantity: number) {
+  async updateItemQuantity(userId: string, itemId: string, quantity: number) {
     const item = await this.repo.findOne({ where: { id: itemId, userId } });
     if (!item) {
       throw new NotFoundException(
@@ -45,7 +45,7 @@ export class QuoteListService {
     return this.repo.save(item);
   }
 
-  async removeItem(userId: number, itemId: number) {
+  async removeItem(userId: string, itemId: string) {
     const item = await this.repo.findOne({ where: { id: itemId, userId } });
     if (!item) {
       throw new NotFoundException(
@@ -55,7 +55,7 @@ export class QuoteListService {
     return this.repo.remove(item);
   }
 
-  async clear(userId: number) {
+  async clear(userId: string) {
     const items = await this.getItems(userId);
     if (items.length) await this.repo.remove(items);
     return { cleared: items.length };
@@ -65,7 +65,7 @@ export class QuoteListService {
   // login/register — same reasoning as CartService.mergeGuestCart:
   // matching items (same productId + variantLabel) get their quantities
   // combined instead of duplicated.
-  async mergeGuestList(userId: number, guestItems: AddQuoteListItemDto[]) {
+  async mergeGuestList(userId: string, guestItems: AddQuoteListItemDto[]) {
     const existingItems = await this.getItems(userId);
     for (const guestItem of guestItems) {
       const existing = existingItems.find(

@@ -76,13 +76,13 @@ export class FunctionsService {
     return this.functionsRepo.save(fn);
   }
 
-  async update(id: number, data: { name?: string; slug?: string; description?: string }) {
+  async update(id: string, data: { name?: string; slug?: string; description?: string }) {
     const fn = await this.functionsRepo.preload({ id, ...data });
     if (!fn) throw new NotFoundException(`Function #${id} not found`);
     return this.functionsRepo.save(fn);
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const fn = await this.functionsRepo.findOne({ where: { id } });
     if (!fn) throw new NotFoundException(`Function #${id} not found`);
     return this.functionsRepo.remove(fn);

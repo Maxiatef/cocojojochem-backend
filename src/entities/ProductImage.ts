@@ -3,11 +3,11 @@ import { Product } from './Product';
 
 @Entity('product_images')
 export class ProductImage {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @ManyToOne(() => Product, (product) => product.gallery, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })

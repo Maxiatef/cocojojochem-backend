@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -46,14 +46,14 @@ export class CartController {
   @Patch('items/:id')
   updateItem(
     @Req() req: any,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCartItemDto,
   ) {
     return this.cartService.updateItemQuantity(req.user.id, id, dto.quantity);
   }
 
   @Delete('items/:id')
-  removeItem(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  removeItem(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.cartService.removeItem(req.user.id, id);
   }
 }

@@ -7,7 +7,7 @@ import {
   Param,
   Delete,
   ForbiddenException,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -55,7 +55,7 @@ export class RolesController {
   }
 
   // Declared before ':id' — 'permissions' would otherwise be swallowed by the
-  // param route and rejected by ParseIntPipe.
+  // param route and rejected by ParseUUIDPipe.
   @Get('permissions/all')
   @RequirePermission('canViewRoles')
   getAllPermissions() {
@@ -71,7 +71,7 @@ export class RolesController {
 
   @Get(':id')
   @RequirePermission('canViewRoles')
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.rolesService.findOne(id);
   }
 
@@ -83,13 +83,13 @@ export class RolesController {
 
   @Patch(':id')
   @RequirePermission('canManageRoles')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRoleDto) {
     return this.rolesService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('canManageRoles')
-  delete(@Param('id', ParseIntPipe) id: number) {
+  delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.rolesService.delete(id);
   }
 }

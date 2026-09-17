@@ -18,8 +18,8 @@ export enum SeoIssueSeverity {
 
 @Entity('seo_issues')
 export class SeoIssue {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   path: string;

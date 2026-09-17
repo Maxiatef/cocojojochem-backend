@@ -7,12 +7,12 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 
 // would add ~100ms to every refresh call for no security benefit.
 @Entity('refresh_tokens')
 export class RefreshToken {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Index()
-  @Column()
-  userId: number;
+  @Column({ type: 'uuid' })
+  userId: string;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 64 })

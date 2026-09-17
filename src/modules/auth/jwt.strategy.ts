@@ -5,9 +5,9 @@ import { UserStatus } from '../../entities';
 import { UsersService } from '../users/users.service';
 
 export interface JwtPayload {
-  sub: number;
+  sub: string;
   email: string;
-  roleId: number | null;
+  roleId: string | null;
 }
 
 @Injectable()

@@ -25,7 +25,7 @@ export class QuoteRequestsService {
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const qr = await this.quoteRequestsRepo.findOne({ where: { id }, relations: ['items'] });
     if (!qr) throw new NotFoundException(`Quote request #${id} not found`);
     return qr;
@@ -59,7 +59,7 @@ export class QuoteRequestsService {
     return saved;
   }
 
-  async updateStatus(id: number, status: RequestStatus) {
+  async updateStatus(id: string, status: RequestStatus) {
     const qr = await this.findOne(id);
     const previousStatus = qr.status;
     qr.status = status;

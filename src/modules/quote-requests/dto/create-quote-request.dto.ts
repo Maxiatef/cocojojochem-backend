@@ -1,19 +1,11 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsEmail,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { RequestType } from '../../../entities';
 
 class QuoteRequestItemDto {
   @IsOptional()
-  @IsInt()
-  productId?: number;
+  @IsUUID('4')
+  productId?: string;
 
   @IsString()
   productName: string;

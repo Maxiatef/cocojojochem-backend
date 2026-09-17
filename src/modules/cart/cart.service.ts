@@ -16,7 +16,7 @@ export class CartService {
     private readonly variantRepo: Repository<ProductVariant>,
   ) {}
 
-  private async getOrCreateCart(userId: number) {
+  private async getOrCreateCart(userId: string) {
     let cart = await this.cartRepo.findOne({
       where: { userId },
       relations: ['items', 'items.variant', 'items.variant.product'],
@@ -51,7 +51,7 @@ export class CartService {
     if (stale.length) await this.cartItemRepo.save(stale);
   }
 
-  getCart(userId: number) {
+  getCart(userId: string) {
     return this.getOrCreateCart(userId);
   }
 
@@ -59,7 +59,7 @@ export class CartService {
   // items (not just one row) — the order limit applies cumulatively per
   // variant, not per line item. `excludeItemId` lets updateItemQuantity
   // recompute "everything else in the cart" before adding the new quantity.
-  private quantityAlreadyInCart(cart: Cart, variantId: number, excludeItemId?: number): number {
+  private quantityAlreadyInCart(cart: Cart, variantId: string, excludeItemId?: string): number {
     return cart.items
       .filter((i) => i.productVariantId === variantId && i.id !== excludeItemId)
       .reduce((sum, i) => sum + i.quantity, 0);
@@ -129,7 +129,7 @@ export class CartService {
     throw new BadRequestException(`${label} isn't available for purchase yet — it becomes available on ${when}.`);
   }
 
-  async addItem(userId: number, dto: AddCartItemDto) {
+  async addItem(userId: string, dto: AddCartItemDto) {
     const cart = await this.getOrCreateCart(userId);
     const variant = await this.variantRepo.findOne({
       where: { id: dto.productVariantId },
@@ -160,7 +160,7 @@ export class CartService {
     return this.cartItemRepo.save(item);
   }
 
-  async updateItemQuantity(userId: number, itemId: number, quantity: number) {
+  async updateItemQuantity(userId: string, itemId: string, quantity: number) {
     const cart = await this.getOrCreateCart(userId);
     const item = cart.items.find((i) => i.id === itemId);
     if (!item) {
@@ -182,7 +182,7 @@ export class CartService {
     return this.cartItemRepo.save(item);
   }
 
-  async removeItem(userId: number, itemId: number) {
+  async removeItem(userId: string, itemId: string) {
     const cart = await this.getOrCreateCart(userId);
     const item = cart.items.find((i) => i.id === itemId);
     if (!item) {
@@ -195,7 +195,7 @@ export class CartService {
 
   // Totals joined from cart items + their live variant price/stock — what the
   // cart drawer/checkout summary needs without recomputing on the frontend.
-  async getSummary(userId: number) {
+  async getSummary(userId: string) {
     const cart = await this.getOrCreateCart(userId);
     const subtotal = cart.items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
     const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -206,7 +206,7 @@ export class CartService {
   }
 
   // Merges a guest (localStorage) cart into the server cart on login/register.
-  async mergeGuestCart(userId: number, guestItems: AddCartItemDto[]) {
+  async mergeGuestCart(userId: string, guestItems: AddCartItemDto[]) {
     const cart = await this.getOrCreateCart(userId);
     for (const guestItem of guestItems) {
       const existing = cart.items.find(

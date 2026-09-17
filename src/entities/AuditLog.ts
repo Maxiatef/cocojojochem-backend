@@ -70,8 +70,8 @@ export class AuditLog {
   // Deliberately NOT a foreign key to users. A FK would force either
   // ON DELETE CASCADE (which erases a departed admin's entire history, the
   // opposite of the point) or RESTRICT (which makes them undeletable).
-  @Column({ type: 'int', nullable: true })
-  actorId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  actorId: string | null;
 
   // Snapshots, so the log still reads correctly after the account is renamed,
   // demoted or deleted. actorRole is the role AT THE TIME of the action.
@@ -96,7 +96,7 @@ export class AuditLog {
   // varchar rather than int so non-integer keys fit: ShippingRateTier is keyed
   // by kind/zone/breakpoint and SiteSetting by a string key. Joining is still
   // ordinary SQL:
-  //   JOIN products p ON p.id = a."entityId"::int AND a."entityName" = 'Product'
+  //   JOIN products p ON p.id = a."entityId"::uuid AND a."entityName" = 'Product'
   @Column({ type: 'varchar', length: 64 })
   entityId: string;
 

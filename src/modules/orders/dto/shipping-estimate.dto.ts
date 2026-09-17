@@ -1,9 +1,9 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
 
 export class ShippingEstimateItemDto {
-  @IsInt()
-  productVariantId: number;
+  @IsUUID('4')
+  productVariantId: string;
 
   @IsInt()
   @Min(1)

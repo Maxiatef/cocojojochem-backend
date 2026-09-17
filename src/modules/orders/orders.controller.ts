@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -49,7 +49,7 @@ export class OrdersController {
     return this.ordersService.findAllAdmin(status, Number(page), Number(limit));
   }
 
-  // Declared before ':id' — 'admin' as a numeric id would 400 on ParseIntPipe.
+  // Declared before ':id' — 'admin' as a numeric id would 400 on ParseUUIDPipe.
   @Get('admin/stats')
   @RequirePermission('canViewOrders')
   @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -85,7 +85,7 @@ export class OrdersController {
   @UseGuards(JwtAuthGuard, PermissionGuard)
   updateStatus(
     @Req() req: any,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
     const required =
@@ -99,7 +99,7 @@ export class OrdersController {
   @Patch(':id/tracking')
   @RequirePermission('canEditOrderTracking')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  updateTracking(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTrackingDto) {
+  updateTracking(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTrackingDto) {
     return this.ordersService.updateTracking(id, dto);
   }
 
@@ -107,7 +107,7 @@ export class OrdersController {
   @Get(':id/tracking/admin')
   @RequirePermission('canViewOrders')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  getTrackingAdmin(@Param('id', ParseIntPipe) id: number) {
+  getTrackingAdmin(@Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.getTrackingCheckpoints(id);
   }
 
@@ -127,7 +127,7 @@ export class OrdersController {
   // Customer: live tracking lookup, restricted to the order's own owner.
   @Get(':id/tracking')
   @UseGuards(JwtAuthGuard)
-  async getTracking(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  async getTracking(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     // Reuses findOne's ownership check (throws NotFoundException if the order
     // doesn't belong to this user) before doing the live lookup.
     await this.ordersService.findOne(req.user.id, id);
@@ -143,7 +143,7 @@ export class OrdersController {
   @Post(':id/cancel')
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 10, ttl: 600_000 } })
-  cancelOwnOrder(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  cancelOwnOrder(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.cancelByCustomer(req.user.id, id);
   }
 
@@ -155,7 +155,7 @@ export class OrdersController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  findOne(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+  findOne(@Req() req: any, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.findOne(req.user.id, id);
   }
 

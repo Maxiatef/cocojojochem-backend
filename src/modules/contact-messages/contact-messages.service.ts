@@ -44,7 +44,7 @@ export class ContactMessagesService {
     return { total, unread };
   }
 
-  private async getOrThrow(id: number) {
+  private async getOrThrow(id: string) {
     const message = await this.messagesRepo.findOne({ where: { id } });
     if (!message) throw new NotFoundException(`Contact message #${id} not found`);
     return message;
@@ -52,7 +52,7 @@ export class ContactMessagesService {
 
   // Opening a message marks it read — matches "when the admin opens a
   // message it must be read" with no separate manual action required.
-  async findOne(id: number) {
+  async findOne(id: string) {
     const message = await this.getOrThrow(id);
     if (message.status === ContactMessageStatus.UNREAD) {
       message.status = ContactMessageStatus.READ;
@@ -62,7 +62,7 @@ export class ContactMessagesService {
     return message;
   }
 
-  async updateStatus(id: number, status: ContactMessageStatus) {
+  async updateStatus(id: string, status: ContactMessageStatus) {
     const message = await this.getOrThrow(id);
     const previous = message.status;
     message.status = status;
@@ -71,7 +71,7 @@ export class ContactMessagesService {
     return saved;
   }
 
-  async setReplied(id: number, replied: boolean) {
+  async setReplied(id: string, replied: boolean) {
     const message = await this.getOrThrow(id);
     message.repliedAt = replied ? new Date() : null;
     const saved = await this.messagesRepo.save(message);
@@ -79,7 +79,7 @@ export class ContactMessagesService {
     return saved;
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const message = await this.getOrThrow(id);
     await this.messagesRepo.remove(message);
     this.logger.log(`Contact message #${id} deleted`);

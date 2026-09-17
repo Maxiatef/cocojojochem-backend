@@ -129,7 +129,7 @@ export class ShippoService {
    */
   private async buildParcel(
     order: Order,
-    variantsById: Map<number, ProductVariant>,
+    variantsById: Map<string, ProductVariant>,
   ): Promise<{ parcel: ShippoParcel | null; requiresFreight: boolean; weightSource: string }> {
     let totalWeight = 0;
     let usedFallback = false;
@@ -185,7 +185,7 @@ export class ShippoService {
    */
   async purchaseLabelForOrder(
     order: Order,
-    variantsById: Map<number, ProductVariant>,
+    variantsById: Map<string, ProductVariant>,
   ): Promise<LabelPurchaseResult> {
     const apiKey = this.apiKey;
     if (!apiKey) {
@@ -403,7 +403,7 @@ export class ShippoService {
   async registerTrackingWebhook(
     carrier: string,
     trackingNumber: string,
-    orderId?: number,
+    orderId?: string,
   ): Promise<boolean> {
     const apiKey = this.apiKey;
     if (!apiKey) return false;

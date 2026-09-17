@@ -12,8 +12,8 @@ import { Product } from './Product';
 
 @Entity('categories')
 export class Category {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   name: string;
@@ -27,8 +27,8 @@ export class Category {
   @Column({ type: 'varchar', nullable: true })
   imageUrl: string | null;
 
-  @Column({ type: 'int', nullable: true })
-  parentId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  parentId: string | null;
 
   @ManyToOne(() => Category, (category) => category.children, { nullable: true })
   @JoinColumn({ name: 'parentId' })

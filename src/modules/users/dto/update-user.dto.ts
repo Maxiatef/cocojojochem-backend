@@ -24,17 +24,17 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsInt()
-  roleId?: number | null;
+  roleId?: string | null;
 
   // Null clears the team. Validated as an int rather than a positive int so
   // the "no team" case can be sent explicitly instead of by omission — the
   // service distinguishes undefined (leave alone) from null (remove).
   @IsOptional()
   @IsInt()
-  teamId?: number | null;
+  teamId?: string | null;
 
   @IsOptional()
-  companyId?: number | null;
+  companyId?: string | null;
 }
 
 export class AdminSetPasswordDto {

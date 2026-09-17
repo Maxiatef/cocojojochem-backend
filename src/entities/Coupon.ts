@@ -15,8 +15,8 @@ export enum CouponType {
 
 @Entity('coupons')
 export class Coupon {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ unique: true })
   code: string;

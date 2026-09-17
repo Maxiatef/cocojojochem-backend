@@ -18,6 +18,7 @@ import {
   SKIP_ENTITIES,
 } from '../../common/audit/audit-config';
 import { QueryAuditLogsDto } from './dto/query-audit-logs.dto';
+import { isUuid } from '../../common/uuid';
 
 @Injectable()
 export class AuditLogService {
@@ -117,7 +118,7 @@ export class AuditLogService {
   async record(entry: {
     action: AuditAction;
     actorType: AuditActorType;
-    actorId?: number | null;
+    actorId?: string | null;
     actorEmail?: string | null;
     actorRole?: string | null;
     entityName: string;
@@ -166,7 +167,7 @@ export class AuditLogService {
    * array means "nobody", which is the correct answer for an empty team —
    * never "everybody".
    */
-  async findAll(query: QueryAuditLogsDto, restrictToActorIds?: number[]) {
+  async findAll(query: QueryAuditLogsDto, restrictToActorIds?: string[]) {
     const page = Math.max(1, parseInt(query.page || '1', 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(query.limit || '50', 10) || 50));
 
@@ -179,14 +180,22 @@ export class AuditLogService {
       qb.andWhere('a.actorId IN (:...restrictActorIds)', { restrictActorIds: restrictToActorIds });
       // A narrower actorId filter is still allowed (that is the per-member
       // drill-down), but only within the permitted set.
-      if (query.actorId && !restrictToActorIds.includes(parseInt(query.actorId, 10))) {
+      if (query.actorId && !restrictToActorIds.includes(query.actorId)) {
         return { data: [], pagination: { total: 0, page, limit, totalPages: 0 } };
       }
     }
 
     if (query.entityName) qb.andWhere('a.entityName = :entityName', { entityName: query.entityName });
     if (query.entityId) qb.andWhere('a.entityId = :entityId', { entityId: query.entityId });
-    if (query.actorId) qb.andWhere('a.actorId = :actorId', { actorId: parseInt(query.actorId, 10) });
+    // Guarded rather than passed straight through: actorId is a uuid column,
+    // and postgres answers a malformed uuid with an error, so an unchecked
+    // query string would turn a bad filter value into a 500.
+    if (query.actorId) {
+      if (!isUuid(query.actorId)) {
+        return { data: [], pagination: { total: 0, page, limit, totalPages: 0 } };
+      }
+      qb.andWhere('a.actorId = :actorId', { actorId: query.actorId });
+    }
     if (query.actorType) qb.andWhere('a.actorType = :actorType', { actorType: query.actorType });
     // Case-insensitive, so selecting "Admin" also returns the "ADMIN" rows
     // written before roles moved from a hardcoded enum to the roles table.
@@ -283,7 +292,7 @@ export class AuditLogService {
         WHERE a."actorId" IS NOT NULL`,
     );
 
-    const byId = new Map<number, { id: number; email: string; role: string; status?: string }>();
+    const byId = new Map<string, { id: string; email: string; role: string; status?: string }>();
     for (const row of staff) byId.set(row.id, row);
     for (const row of pastActors) {
       if (!byId.has(row.id)) byId.set(row.id, { ...row, status: 'GONE' });

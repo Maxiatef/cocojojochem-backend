@@ -3,8 +3,8 @@ import { Product } from './Product';
 
 @Entity('functions')
 export class Function {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   name: string; // e.g. "Anti-Aging", "Antioxidant", "Humectant"

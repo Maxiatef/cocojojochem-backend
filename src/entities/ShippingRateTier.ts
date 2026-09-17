@@ -17,8 +17,8 @@ export enum ShippingRateTierKind {
 @Entity('shipping_rate_tiers')
 @Index(['kind', 'zone', 'breakpoint'], { unique: true })
 export class ShippingRateTier {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ type: 'enum', enum: ShippingRateTierKind })
   kind: ShippingRateTierKind;

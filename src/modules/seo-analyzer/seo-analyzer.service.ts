@@ -362,7 +362,7 @@ export class SeoAnalyzerService {
    * Builds the analyser input from a saved product, so create/update can
    * store the score without the caller assembling the shape by hand.
    */
-  async scoreSavedProduct(productId: number): Promise<ProductSeoResult | null> {
+  async scoreSavedProduct(productId: string): Promise<ProductSeoResult | null> {
     const product = await this.productsRepo.findOne({
       where: { id: productId },
       relations: ['seo', 'gallery'],

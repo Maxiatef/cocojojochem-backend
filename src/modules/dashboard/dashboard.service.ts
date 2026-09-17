@@ -164,11 +164,11 @@ export class DashboardService {
         onBackorderCount,
         lowStockCount,
         lowStockProducts: lowStockVariants.map((v) => ({
-          variantId: Number(v.variantId),
+          variantId: String(v.variantId),
           variantLabel: v.variantLabel,
           sku: v.sku,
           stockQuantity: Number(v.stockQuantity),
-          productId: Number(v.productId),
+          productId: String(v.productId),
           productName: v.productName,
           productSlug: v.productSlug,
         })),

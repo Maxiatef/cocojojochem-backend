@@ -2,8 +2,8 @@ import { Entity, PrimaryGeneratedColumn, Column, UpdateDateColumn } from 'typeor
 
 @Entity('site_settings')
 export class SiteSetting {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ unique: true })
   key: string;

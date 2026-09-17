@@ -1,8 +1,8 @@
-import { IsArray, IsInt } from 'class-validator';
+import { IsArray, IsUUID } from 'class-validator';
 
 /** Used by the manager-facing roster endpoint, which can only ever set members. */
 export class SetTeamMembersDto {
   @IsArray()
-  @IsInt({ each: true })
-  memberIds: number[];
+  @IsUUID('4', { each: true })
+  memberIds: string[];
 }

@@ -5,18 +5,18 @@ import { PurchaseType } from './CartItem';
 
 @Entity('order_items')
 export class OrderItem {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  orderId: number;
+  @Column({ type: 'uuid' })
+  orderId: string;
 
   @ManyToOne(() => Order, (order) => order.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'orderId' })
   order: Order;
 
-  @Column({ nullable: true })
-  productVariantId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  productVariantId: string | null;
 
   @ManyToOne(() => ProductVariant, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'productVariantId' })

@@ -134,19 +134,19 @@ export class RolesService implements OnApplicationBootstrap {
       .addSelect('COUNT(*)', 'count')
       .where('user.roleId IS NOT NULL')
       .groupBy('user.roleId')
-      .getRawMany<{ roleId: number; count: string }>();
+      .getRawMany<{ roleId: string; count: string }>();
 
-    const byRole = new Map(counts.map((c) => [Number(c.roleId), Number(c.count)]));
+    const byRole = new Map(counts.map((c) => [String(c.roleId), Number(c.count)]));
     return roles.map((r) => Object.assign(r, { userCount: byRole.get(r.id) ?? 0 }));
   }
 
-  async findOne(id: number): Promise<Role> {
+  async findOne(id: string): Promise<Role> {
     const role = await this.rolesRepo.findOne({ where: { id } });
     if (!role) throw new NotFoundException('Role not found');
     return role;
   }
 
-  async update(id: number, dto: UpdateRoleDto): Promise<Role> {
+  async update(id: string, dto: UpdateRoleDto): Promise<Role> {
     const role = await this.findOne(id);
 
     if (dto.name !== undefined) {
@@ -181,7 +181,7 @@ export class RolesService implements OnApplicationBootstrap {
     return this.rolesRepo.save(role);
   }
 
-  async delete(id: number): Promise<void> {
+  async delete(id: string): Promise<void> {
     const role = await this.findOne(id);
     if (role.isSystem) throw new BadRequestException('Cannot delete system roles');
 
@@ -196,7 +196,7 @@ export class RolesService implements OnApplicationBootstrap {
   }
 
   /** A permission is granted only on a strict `true` — absent means denied. */
-  async hasPermission(roleId: number | null, permission: string): Promise<boolean> {
+  async hasPermission(roleId: string | null, permission: string): Promise<boolean> {
     if (!roleId) return false;
     const role = await this.rolesRepo.findOne({ where: { id: roleId } });
     return role?.permissions?.[permission] === true;

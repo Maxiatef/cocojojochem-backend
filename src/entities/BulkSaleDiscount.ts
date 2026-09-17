@@ -9,8 +9,8 @@ import {
 // Standalone — no FK relations to Product/Category, matches the real site's schema.
 @Entity('bulk_sale_discounts')
 export class BulkSaleDiscount {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   name: string;

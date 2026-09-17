@@ -19,7 +19,7 @@ import { TeamReportDto } from './dto/team-report.dto';
 const DEFAULT_REPORT_DAYS = 30;
 
 export interface TeamMemberSummary {
-  id: number;
+  id: string;
   fullName: string;
   email: string;
   roleName: string | null;
@@ -59,9 +59,9 @@ export class TeamsService {
       .where('user.teamId IS NOT NULL')
       .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
       .groupBy('user.teamId')
-      .getRawMany<{ teamId: number; count: string }>();
+      .getRawMany<{ teamId: string; count: string }>();
 
-    const byTeam = new Map(counts.map((c) => [Number(c.teamId), Number(c.count)]));
+    const byTeam = new Map(counts.map((c) => [String(c.teamId), Number(c.count)]));
 
     return teams.map((team) => ({
       ...this.stripManager(team),
@@ -74,7 +74,7 @@ export class TeamsService {
     return this.teamsRepo.find({ select: ['id', 'name'], order: { name: 'ASC' } });
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const team = await this.teamsRepo.findOne({ where: { id }, relations: ['manager'] });
     if (!team) throw new NotFoundException(`Team #${id} not found`);
 
@@ -109,7 +109,7 @@ export class TeamsService {
     return this.findOne(team.id);
   }
 
-  async update(id: number, dto: UpdateTeamDto) {
+  async update(id: string, dto: UpdateTeamDto) {
     const team = await this.teamsRepo.findOne({ where: { id } });
     if (!team) throw new NotFoundException(`Team #${id} not found`);
 
@@ -132,7 +132,7 @@ export class TeamsService {
     return this.findOne(id);
   }
 
-  async delete(id: number) {
+  async delete(id: string) {
     const team = await this.teamsRepo.findOne({ where: { id } });
     if (!team) throw new NotFoundException(`Team #${id} not found`);
 
@@ -158,7 +158,7 @@ export class TeamsService {
    * knows the intended final state, and sending that is atomic. A delta API
    * would let two concurrent editors produce a roster neither of them chose.
    */
-  async setMembers(teamId: number, memberIds: number[]) {
+  async setMembers(teamId: string, memberIds: string[]) {
     const team = await this.teamsRepo.findOne({ where: { id: teamId } });
     if (!team) throw new NotFoundException(`Team #${teamId} not found`);
 
@@ -229,7 +229,7 @@ export class TeamsService {
    * another team by changing an id in a URL. Every manager-facing route goes
    * through it.
    */
-  async resolveManagedTeam(userId: number): Promise<Team> {
+  async resolveManagedTeam(userId: string): Promise<Team> {
     const team = await this.teamsRepo.findOne({
       where: { managerId: userId },
       relations: ['manager'],
@@ -241,7 +241,7 @@ export class TeamsService {
   }
 
   /** Active member ids of a team. `[]` for an empty team — never "everyone". */
-  async memberIdsOf(teamId: number): Promise<number[]> {
+  async memberIdsOf(teamId: string): Promise<string[]> {
     const rows = await this.usersRepo.find({
       where: { teamId, status: UserStatus.ACTIVE },
       select: ['id'],
@@ -253,7 +253,7 @@ export class TeamsService {
    * A manager's landing view: the team, its members, and how active each
    * member has been.
    */
-  async myTeam(userId: number) {
+  async myTeam(userId: string) {
     const team = await this.resolveManagedTeam(userId);
     return this.teamOverview(team);
   }
@@ -265,38 +265,38 @@ export class TeamsService {
    * needs to see that a member edited a product or a coupon just as much as an
    * order. Scope comes from *who acted*, never from what they acted on.
    */
-  async myTeamActivity(userId: number, query: QueryAuditLogsDto) {
+  async myTeamActivity(userId: string, query: QueryAuditLogsDto) {
     const team = await this.resolveManagedTeam(userId);
     const memberIds = await this.memberIdsOf(team.id);
     return this.auditLog.findAll(query, memberIds);
   }
 
-  async myTeamReport(userId: number, dto: TeamReportDto) {
+  async myTeamReport(userId: string, dto: TeamReportDto) {
     const team = await this.resolveManagedTeam(userId);
     return this.buildReport(team, dto);
   }
 
   /** Lets a manager edit their own roster without granting canManageTeams. */
-  async setOwnTeamMembers(userId: number, memberIds: number[]) {
+  async setOwnTeamMembers(userId: string, memberIds: string[]) {
     const team = await this.resolveManagedTeam(userId);
     return this.setMembers(team.id, memberIds);
   }
 
   // --------------------------------------------- admin views of any team
 
-  async teamOverviewById(teamId: number) {
+  async teamOverviewById(teamId: string) {
     const team = await this.teamsRepo.findOne({ where: { id: teamId }, relations: ['manager'] });
     if (!team) throw new NotFoundException(`Team #${teamId} not found`);
     return this.teamOverview(team);
   }
 
-  async teamReport(teamId: number, dto: TeamReportDto) {
+  async teamReport(teamId: string, dto: TeamReportDto) {
     const team = await this.teamsRepo.findOne({ where: { id: teamId }, relations: ['manager'] });
     if (!team) throw new NotFoundException(`Team #${teamId} not found`);
     return this.buildReport(team, dto);
   }
 
-  async teamActivity(teamId: number, query: QueryAuditLogsDto) {
+  async teamActivity(teamId: string, query: QueryAuditLogsDto) {
     const team = await this.teamsRepo.findOne({ where: { id: teamId }, select: ['id'] });
     if (!team) throw new NotFoundException(`Team #${teamId} not found`);
     const memberIds = await this.memberIdsOf(teamId);
@@ -343,7 +343,7 @@ export class TeamsService {
     const memberIds = members.map((m) => m.id);
 
     // An empty team is a valid state with a valid answer: zeroes. Returning
-    // early also keeps `= ANY($1)` from being handed an empty array.
+    // early also keeps `= ANY($1::uuid[])` from being handed an empty array.
     if (memberIds.length === 0) {
       return {
         team: this.stripManager(team),
@@ -358,18 +358,18 @@ export class TeamsService {
       this.dataSource.query(
         `SELECT a."actorId" AS "actorId", a.action::text AS action, COUNT(*)::int AS count
            FROM audit_logs a
-          WHERE a."actorId" = ANY($1) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
+          WHERE a."actorId" = ANY($1::uuid[]) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
           GROUP BY 1, 2`,
         [memberIds, from, to],
-      ) as Promise<{ actorId: number; action: string; count: number }[]>,
+      ) as Promise<{ actorId: string; action: string; count: number }[]>,
 
       this.dataSource.query(
         `SELECT a."actorId" AS "actorId", a."entityName" AS "entityName", COUNT(*)::int AS count
            FROM audit_logs a
-          WHERE a."actorId" = ANY($1) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
+          WHERE a."actorId" = ANY($1::uuid[]) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
           GROUP BY 1, 2`,
         [memberIds, from, to],
-      ) as Promise<{ actorId: number; entityName: string; count: number }[]>,
+      ) as Promise<{ actorId: string; entityName: string; count: number }[]>,
 
       // Orders a member touched, and what those orders are worth.
       //
@@ -389,14 +389,14 @@ export class TeamsService {
                  SELECT DISTINCT a."actorId", a."entityId"
                    FROM audit_logs a
                   WHERE a."entityName" = 'Order'
-                    AND a."actorId" = ANY($1)
+                    AND a."actorId" = ANY($1::uuid[])
                     AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
-                    AND a."entityId" ~ '^[0-9]+$'
+                    AND a."entityId" ~ '^[0-9a-fA-F-]{36}$'
                 ) t
-           JOIN orders o ON o.id = t."entityId"::int
+           JOIN orders o ON o.id = t."entityId"::uuid
           GROUP BY 1`,
         [memberIds, from, to],
-      ) as Promise<{ actorId: number; orderCount: number; revenue: number }[]>,
+      ) as Promise<{ actorId: string; orderCount: number; revenue: number }[]>,
 
       // Day buckets follow the database's timezone, matching how the existing
       // analytics module groups. The site timezone setting is applied when
@@ -404,33 +404,33 @@ export class TeamsService {
       this.dataSource.query(
         `SELECT DATE_TRUNC('day', a."occurredAt") AS day, COUNT(*)::int AS count
            FROM audit_logs a
-          WHERE a."actorId" = ANY($1) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
+          WHERE a."actorId" = ANY($1::uuid[]) AND a."occurredAt" >= $2 AND a."occurredAt" <= $3
           GROUP BY 1 ORDER BY 1 ASC`,
         [memberIds, from, to],
       ) as Promise<{ day: Date; count: number }[]>,
     ]);
 
-    const actionsByMember = new Map<number, Record<string, number>>();
-    const entitiesByMember = new Map<number, Record<string, number>>();
+    const actionsByMember = new Map<string, Record<string, number>>();
+    const entitiesByMember = new Map<string, Record<string, number>>();
     const totalsByAction: Record<string, number> = {};
     const totalsByEntity: Record<string, number> = {};
 
     for (const row of byAction) {
-      const id = Number(row.actorId);
+      const id = String(row.actorId);
       const bucket = actionsByMember.get(id) ?? {};
       bucket[row.action] = (bucket[row.action] ?? 0) + Number(row.count);
       actionsByMember.set(id, bucket);
       totalsByAction[row.action] = (totalsByAction[row.action] ?? 0) + Number(row.count);
     }
     for (const row of byEntity) {
-      const id = Number(row.actorId);
+      const id = String(row.actorId);
       const bucket = entitiesByMember.get(id) ?? {};
       bucket[row.entityName] = (bucket[row.entityName] ?? 0) + Number(row.count);
       entitiesByMember.set(id, bucket);
       totalsByEntity[row.entityName] = (totalsByEntity[row.entityName] ?? 0) + Number(row.count);
     }
 
-    const ordersByMember = new Map(orders.map((o) => [Number(o.actorId), o]));
+    const ordersByMember = new Map(orders.map((o) => [String(o.actorId), o]));
 
     const memberRows = members.map((m) => {
       const actions = actionsByMember.get(m.id) ?? {};
@@ -464,23 +464,23 @@ export class TeamsService {
   }
 
   /** Total actions and last-seen per member, for the team overview. */
-  private async activityTotals(memberIds: number[]) {
-    const map = new Map<number, { count: number; lastActiveAt: Date }>();
+  private async activityTotals(memberIds: string[]) {
+    const map = new Map<string, { count: number; lastActiveAt: Date }>();
     if (memberIds.length === 0) return map;
 
-    const rows: { actorId: number; count: number; lastActiveAt: Date }[] =
+    const rows: { actorId: string; count: number; lastActiveAt: Date }[] =
       await this.dataSource.query(
         `SELECT a."actorId" AS "actorId",
                 COUNT(*)::int AS count,
                 MAX(a."occurredAt") AS "lastActiveAt"
            FROM audit_logs a
-          WHERE a."actorId" = ANY($1)
+          WHERE a."actorId" = ANY($1::uuid[])
           GROUP BY 1`,
         [memberIds],
       );
 
     for (const row of rows) {
-      map.set(Number(row.actorId), { count: Number(row.count), lastActiveAt: row.lastActiveAt });
+      map.set(String(row.actorId), { count: Number(row.count), lastActiveAt: row.lastActiveAt });
     }
     return map;
   }
@@ -498,14 +498,14 @@ export class TeamsService {
     return from > to ? { from: to, to: from } : { from, to };
   }
 
-  private async assertNameFree(name: string, exceptId?: number) {
+  private async assertNameFree(name: string, exceptId?: string) {
     const existing = await this.teamsRepo.findOne({ where: { name: name.trim() } });
     if (existing && existing.id !== exceptId) {
       throw new ConflictException(`A team named "${name.trim()}" already exists.`);
     }
   }
 
-  private async assertIsStaff(userId: number, what: string) {
+  private async assertIsStaff(userId: string, what: string) {
     const user = await this.usersRepo.findOne({ where: { id: userId }, select: ['id', 'roleId'] });
     if (!user) throw new BadRequestException(`The selected ${what} no longer exists.`);
     if (user.roleId == null) {

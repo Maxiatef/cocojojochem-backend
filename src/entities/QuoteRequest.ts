@@ -29,18 +29,18 @@ export enum RequestStatus {
 
 @Entity('quote_requests')
 export class QuoteRequest {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column({ type: 'int', nullable: true })
-  companyId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  companyId: string | null;
 
   @ManyToOne(() => Company, (company) => company.quoteRequests, { nullable: true })
   @JoinColumn({ name: 'companyId' })
   company: Company | null;
 
-  @Column({ type: 'int', nullable: true })
-  userId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
 
   @ManyToOne(() => User, (user) => user.quoteRequests, { nullable: true })
   @JoinColumn({ name: 'userId' })
@@ -70,8 +70,8 @@ export class QuoteRequest {
   @OneToMany(() => QuoteRequestItem, (item) => item.quoteRequest, { cascade: true })
   items: QuoteRequestItem[];
 
-  @Column({ type: 'int', nullable: true })
-  assignedToId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  assignedToId: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

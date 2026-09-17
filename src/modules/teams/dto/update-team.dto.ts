@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class UpdateTeamDto {
   @IsString()
@@ -11,11 +11,11 @@ export class UpdateTeamDto {
 
   @IsInt()
   @IsOptional()
-  managerId?: number | null;
+  managerId?: string | null;
 
   /** Omitted leaves the roster untouched; sent, it replaces it wholesale. */
   @IsArray()
-  @IsInt({ each: true })
+  @IsUUID('4', { each: true })
   @IsOptional()
-  memberIds?: number[];
+  memberIds?: string[];
 }

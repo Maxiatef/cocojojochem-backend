@@ -121,7 +121,14 @@ export class CategoriesService {
 
   // Full detail for the admin "View Category" page: category + parent + children + all its
   // products (including unpublished ones — this is admin-only, unlike findProducts/findBySlug).
-  async findByIdWithProducts(id: number) {
+  /** The same detail view, reached by slug so the admin URL stays readable. */
+  async findBySlugWithProducts(slug: string) {
+    const category = await this.categoriesRepo.findOne({ where: { slug }, select: ['id'] });
+    if (!category) throw new NotFoundException(`Category "${slug}" not found`);
+    return this.findByIdWithProducts(category.id);
+  }
+
+  async findByIdWithProducts(id: string) {
     const category = await this.categoriesRepo.findOne({
       where: { id },
       relations: ['parent', 'children'],
@@ -149,7 +156,7 @@ export class CategoriesService {
    * That rule also makes cycles impossible without walking the chain: a
    * category can only point at a root, and a root points at nothing.
    */
-  private async assertValidParent(parentId: number | null | undefined, selfId?: number) {
+  private async assertValidParent(parentId: string | null | undefined, selfId?: string) {
     if (parentId === null || parentId === undefined) return;
 
     if (selfId !== undefined && parentId === selfId) {
@@ -187,7 +194,7 @@ export class CategoriesService {
     return saved;
   }
 
-  async update(id: number, dto: UpdateCategoryDto) {
+  async update(id: string, dto: UpdateCategoryDto) {
     if ('parentId' in dto) await this.assertValidParent(dto.parentId, id);
     const category = await this.categoriesRepo.preload({ id, ...dto });
     if (!category) throw new NotFoundException(`Category #${id} not found`);
@@ -196,7 +203,7 @@ export class CategoriesService {
     return saved;
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const category = await this.categoriesRepo.findOne({ where: { id } });
     if (!category) throw new NotFoundException(`Category #${id} not found`);
 

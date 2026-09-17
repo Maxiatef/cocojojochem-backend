@@ -21,11 +21,11 @@ export enum OrderStatus {
 
 @Entity('orders')
 export class Order {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column({ type: 'int', nullable: true })
-  userId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
 
   @ManyToOne(() => User, (user) => user.orders, { nullable: true })
   @JoinColumn({ name: 'userId' })
@@ -85,8 +85,8 @@ export class Order {
   @Column({ type: 'varchar', nullable: true })
   carrierCode: string | null;
 
-  @Column({ type: 'int', nullable: true })
-  couponId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  couponId: string | null;
 
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   couponAmount: string;

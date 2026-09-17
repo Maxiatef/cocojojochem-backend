@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
@@ -24,7 +24,7 @@ export class BulkSalesController {
 
   @Get(':id')
   @RequirePermission('canViewBulkSales')
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.bulkSalesService.findOne(id);
   }
 
@@ -36,13 +36,13 @@ export class BulkSalesController {
 
   @Patch(':id')
   @RequirePermission('canEditBulkSale')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBulkSaleDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateBulkSaleDto) {
     return this.bulkSalesService.update(id, dto);
   }
 
   @Delete(':id')
   @RequirePermission('canDeleteBulkSale')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.bulkSalesService.remove(id);
   }
 }

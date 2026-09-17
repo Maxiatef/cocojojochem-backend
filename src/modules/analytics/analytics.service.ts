@@ -110,6 +110,7 @@ export class AnalyticsService {
         .leftJoin('variant.product', 'product')
         .leftJoin('product.category', 'category')
         .select('product.id', 'productId')
+        .addSelect('product.slug', 'productSlug')
         .addSelect('product.name', 'name')
         .addSelect('category.id', 'categoryId')
         .addSelect('category.name', 'categoryName')
@@ -120,6 +121,7 @@ export class AnalyticsService {
         .andWhere('order.status != :cancelled', { cancelled: OrderStatus.CANCELLED })
         .andWhere('product.id IS NOT NULL')
         .groupBy('product.id')
+        .addGroupBy('product.slug')
         .addGroupBy('product.name')
         .addGroupBy('category.id')
         .addGroupBy('category.name')
@@ -162,6 +164,7 @@ export class AnalyticsService {
         .createQueryBuilder('product')
         .leftJoin('product.category', 'category')
         .select('product.id', 'productId')
+        .addSelect('product.slug', 'productSlug')
         .addSelect('product.name', 'name')
         .addSelect('category.name', 'categoryName')
         .addSelect('product.createdAt', 'createdAt')
@@ -184,8 +187,8 @@ export class AnalyticsService {
 
     // Second follow-up aggregation: worst-case stock status per product that
     // had sales, over its *current* variants (not the ones sold historically).
-    const productIds = productRows.map((r) => Number(r.productId));
-    let stockByProduct = new Map<number, string>();
+    const productIds = productRows.map((r) => String(r.productId));
+    let stockByProduct = new Map<string, string>();
     if (productIds.length > 0) {
       const variants = await this.variantsRepo
         .createQueryBuilder('variant')
@@ -193,9 +196,9 @@ export class AnalyticsService {
         .addSelect('variant.stockStatus', 'stockStatus')
         .where('variant.productId IN (:...productIds)', { productIds })
         .getRawMany();
-      const grouped = new Map<number, string[]>();
+      const grouped = new Map<string, string[]>();
       for (const v of variants) {
-        const pid = Number(v.productId);
+        const pid = String(v.productId);
         if (!grouped.has(pid)) grouped.set(pid, []);
         grouped.get(pid)!.push(v.stockStatus);
       }
@@ -220,28 +223,30 @@ export class AnalyticsService {
             : 0,
       },
       products: productRows.map((r) => ({
-        productId: Number(r.productId),
+        productId: String(r.productId),
+        productSlug: r.productSlug,
         name: r.name,
         categoryName: r.categoryName ?? null,
         unitsSold: Number(r.unitsSold),
         revenue: Number(r.revenue),
         orderCount: Number(r.orderCount),
-        stockStatus: stockByProduct.get(Number(r.productId)) || StockStatus.IN_STOCK,
+        stockStatus: stockByProduct.get(String(r.productId)) || StockStatus.IN_STOCK,
       })),
       categories: categoryRows.map((r) => ({
-        categoryId: Number(r.categoryId),
+        categoryId: String(r.categoryId),
         name: r.name,
         revenue: Number(r.revenue),
         unitsSold: Number(r.unitsSold),
       })),
       topCompanies: companyRows.map((r) => ({
-        companyId: Number(r.companyId),
+        companyId: String(r.companyId),
         name: r.name,
         revenue: Number(r.revenue),
         orderCount: Number(r.orderCount),
       })),
       slowMovers: slowMoverRows.map((r) => ({
-        productId: Number(r.productId),
+        productId: String(r.productId),
+        productSlug: r.productSlug,
         name: r.name,
         categoryName: r.categoryName ?? null,
         createdAt: r.createdAt,

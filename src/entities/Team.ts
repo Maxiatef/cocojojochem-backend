@@ -24,8 +24,8 @@ import { User } from './User';
  */
 @Entity('teams')
 export class Team {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column({ unique: true })
   name: string;
@@ -36,8 +36,8 @@ export class Team {
   // ON DELETE SET NULL, not CASCADE: removing a manager's account must leave
   // the team and its members intact, waiting for a new manager, rather than
   // silently deleting the team and orphaning everyone in it.
-  @Column({ type: 'int', nullable: true })
-  managerId: number | null;
+  @Column({ type: 'uuid', nullable: true })
+  managerId: string | null;
 
   @ManyToOne(() => User, (user) => user.managedTeams, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'managerId' })

@@ -7,8 +7,8 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 
 // layout), so this never counts staff/admin activity as site traffic.
 @Entity('page_views')
 export class PageView {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   path: string;

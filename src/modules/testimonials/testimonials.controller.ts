@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   UseGuards,
@@ -28,7 +28,7 @@ export class TestimonialsController {
   }
 
   // Declared before ':id' — 'admin' would otherwise be swallowed as an id
-  // and rejected by ParseIntPipe on that route.
+  // and rejected by ParseUUIDPipe on that route.
   @Get('admin')
   @RequirePermission('canViewTestimonials')
   @ApiBearerAuth('access-token')
@@ -41,7 +41,7 @@ export class TestimonialsController {
   @RequirePermission('canViewTestimonials')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.testimonialsService.findOne(id);
   }
 
@@ -57,7 +57,7 @@ export class TestimonialsController {
   @RequirePermission('canEditTestimonial')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTestimonialDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTestimonialDto) {
     return this.testimonialsService.update(id, dto);
   }
 
@@ -65,7 +65,7 @@ export class TestimonialsController {
   @RequirePermission('canDeleteTestimonial')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.testimonialsService.remove(id);
   }
 }

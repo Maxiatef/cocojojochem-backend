@@ -4,7 +4,7 @@ import {
   Controller,
   Get,
   Param,
-  ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -54,7 +54,7 @@ export class QuoteRequestsController {
   @RequirePermission('canViewQuoteRequests')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.quoteRequestsService.findOne(id);
   }
 
@@ -62,7 +62,7 @@ export class QuoteRequestsController {
   @RequirePermission('canEditQuoteRequest')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateStatusDto) {
+  updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateStatusDto) {
     return this.quoteRequestsService.updateStatus(id, dto.status);
   }
 }

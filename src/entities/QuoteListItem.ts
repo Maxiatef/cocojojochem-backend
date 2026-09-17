@@ -11,17 +11,22 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 
 // need a real SKU, just enough info to describe what the customer wants a
 // quote for (matches QuoteRequestItem, the final submitted request, which
 // is equally descriptive-only).
+//
+// `userId` and `productId` ARE constrained, ON DELETE CASCADE, the same as
+// WishlistItem — see migration 1788910000000. Declared in SQL rather than as
+// @ManyToOne here, matching WishlistItem: neither entity ever loads the
+// related row, so a relation would only add a join nothing uses.
 @Entity('quote_list_items')
 export class QuoteListItem {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Index()
-  @Column()
-  userId: number;
+  @Column({ type: 'uuid' })
+  userId: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @Column()
   productSlug: string;

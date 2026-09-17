@@ -22,11 +22,11 @@ import { isSaleActive } from '../../common/pricing.util';
 // against the database. Checkout never sent the flag at all, so trusting it
 // meant excludeSaleItems silently did nothing on a real order.
 
-function parseIds(value: string | null): number[] {
+function parseIds(value: string | null): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(Number) : [];
+    return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
   }
@@ -90,7 +90,7 @@ export class CouponsService {
     return { data, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const coupon = await this.couponsRepo.findOne({ where: { id } });
     if (!coupon) throw new NotFoundException(`Coupon #${id} not found`);
     return coupon;
@@ -121,7 +121,7 @@ export class CouponsService {
     return saved;
   }
 
-  async update(id: number, dto: UpdateCouponDto) {
+  async update(id: string, dto: UpdateCouponDto) {
     const coupon = await this.findOne(id);
     const patch: any = { ...dto };
     if (dto.code) patch.code = dto.code.toUpperCase();
@@ -150,7 +150,7 @@ export class CouponsService {
     return saved;
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const coupon = await this.findOne(id);
     await this.couponsRepo.remove(coupon);
     this.logger.log(`Coupon deleted: ${coupon.code} (id=${id})`);
@@ -229,7 +229,7 @@ export class CouponsService {
   ): Promise<ValidateCouponCartItemDto[]> {
     if (!coupon.excludeSaleItems || cartItems.length === 0) return cartItems;
 
-    const variantIds = [...new Set(cartItems.map((i) => i.variantId).filter(Boolean))] as number[];
+    const variantIds = [...new Set(cartItems.map((i) => i.variantId).filter(Boolean))] as string[];
     if (variantIds.length === 0) return cartItems;
 
     const variants = await this.variantsRepo.findBy({ id: In(variantIds) });
@@ -389,7 +389,7 @@ export class CouponsService {
     };
   }
 
-  async incrementUsage(couponId: number, email: string, orderId: number | null) {
+  async incrementUsage(couponId: string, email: string, orderId: string | null) {
     await this.couponsRepo.increment({ id: couponId }, 'usageCount', 1);
     const usage = this.couponUsageRepo.create({
       couponId,
@@ -414,7 +414,7 @@ export class CouponsService {
    *
    * Returns true when a usage was actually revoked.
    */
-  async revokeUsageForOrder(orderId: number): Promise<boolean> {
+  async revokeUsageForOrder(orderId: string): Promise<boolean> {
     const usage = await this.couponUsageRepo.findOne({ where: { orderId } });
     if (!usage) return false;
 
@@ -496,7 +496,7 @@ export class CouponsService {
     };
   }
 
-  async getAnalyticsForCoupon(id: number) {
+  async getAnalyticsForCoupon(id: string) {
     const coupon = await this.findOne(id);
 
     const usages = await this.couponUsageRepo.find({

@@ -1,28 +1,18 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsBoolean,
-  IsEmail,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
 
 export class ValidateCouponCartItemDto {
   @IsOptional()
-  @IsInt()
-  productId?: number;
+  @IsUUID('4')
+  productId?: string;
 
   @IsOptional()
-  @IsInt()
-  variantId?: number;
+  @IsUUID('4')
+  variantId?: string;
 
   @IsOptional()
-  @IsInt()
-  categoryId?: number;
+  @IsUUID('4')
+  categoryId?: string;
 
   @IsOptional()
   @IsString()

@@ -7,12 +7,12 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 
 // set-new-password step, so the 5-digit code is only ever usable once.
 @Entity('password_reset_requests')
 export class PasswordResetRequest {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Index()
-  @Column()
-  userId: number;
+  @Column({ type: 'uuid' })
+  userId: string;
 
   @Column({ type: 'varchar', length: 64 })
   codeHash: string;

@@ -14,11 +14,11 @@ import { CartItem } from './CartItem';
 // Guest carts stay client-side (localStorage), matching cocojojo.com's own behavior.
 @Entity('carts')
 export class Cart {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column({ unique: true })
-  userId: number;
+  @Column({ type: 'uuid', unique: true })
+  userId: string;
 
   @OneToOne(() => User, (user) => user.cart, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })

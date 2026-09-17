@@ -1,8 +1,8 @@
-import { IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsInt, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
 
 export class AddQuoteListItemDto {
-  @IsInt()
-  productId: number;
+  @IsUUID('4')
+  productId: string;
 
   @IsString()
   productSlug: string;

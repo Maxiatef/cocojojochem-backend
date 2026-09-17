@@ -16,15 +16,15 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 
 @Entity('wishlist_items')
 @Index('UQ_wishlist_user_product', ['userId', 'productId'], { unique: true })
 export class WishlistItem {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Index()
-  @Column()
-  userId: number;
+  @Column({ type: 'uuid' })
+  userId: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -3,11 +3,11 @@ import { Product } from './Product';
 
 @Entity('product_specs')
 export class ProductSpec {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  productId: number;
+  @Column({ type: 'uuid' })
+  productId: string;
 
   @ManyToOne(() => Product, (product) => product.specs, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })

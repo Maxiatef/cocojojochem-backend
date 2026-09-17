@@ -1,17 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { StockStatus, ProductVisibility, DocType } from '../../../entities';
 
 export class CreateVariantDto {
@@ -21,8 +9,8 @@ export class CreateVariantDto {
   // replaced wholesale on every save — detaching past order items from their
   // variant (OrderItem.productVariantId is ON DELETE SET NULL).
   @IsOptional()
-  @IsInt()
-  id?: number;
+  @IsUUID('4')
+  id?: string;
 
   @IsString()
   sku: string;
@@ -103,8 +91,8 @@ export class CreateVariantDto {
 export class ProductDocumentDto {
   // See CreateVariantDto.id — present for an existing row, absent for a new one.
   @IsOptional()
-  @IsInt()
-  id?: number;
+  @IsUUID('4')
+  id?: string;
 
   @IsString()
   url: string;
@@ -119,15 +107,15 @@ export class ProductDocumentDto {
   // Which certification this file is the proof of. Only meaningful when
   // `type` is CERTIFICATE; ignored otherwise.
   @IsOptional()
-  @IsInt()
-  certificationId?: number;
+  @IsUUID('4')
+  certificationId?: string;
 }
 
 export class GalleryImageDto {
   // See CreateVariantDto.id — present for an existing row, absent for a new one.
   @IsOptional()
-  @IsInt()
-  id?: number;
+  @IsUUID('4')
+  id?: string;
 
   @IsString()
   url: string;
@@ -144,8 +132,8 @@ export class GalleryImageDto {
 export class ProductSpecDto {
   // See CreateVariantDto.id — present for an existing row, absent for a new one.
   @IsOptional()
-  @IsInt()
-  id?: number;
+  @IsUUID('4')
+  id?: string;
 
   @IsString()
   key: string;
@@ -219,18 +207,18 @@ export class CreateProductDto {
   @IsString()
   imageUrl?: string;
 
-  @IsInt()
-  categoryId: number;
+  @IsUUID('4')
+  categoryId: string;
 
   @IsOptional()
   @IsArray()
-  @IsInt({ each: true })
-  functionIds?: number[];
+  @IsUUID('4', { each: true })
+  functionIds?: string[];
 
   @IsOptional()
   @IsArray()
-  @IsInt({ each: true })
-  certificationIds?: number[];
+  @IsUUID('4', { each: true })
+  certificationIds?: string[];
 
   @IsArray()
   @ValidateNested({ each: true })

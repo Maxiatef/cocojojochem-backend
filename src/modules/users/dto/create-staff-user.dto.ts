@@ -1,4 +1,4 @@
-import { IsEmail, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsInt, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class CreateStaffUserDto {
   @IsString()
@@ -15,10 +15,10 @@ export class CreateStaffUserDto {
   @MinLength(8)
   password: string;
 
-  @IsInt()
-  roleId: number;
+  @IsUUID('4')
+  roleId: string;
 
   @IsOptional()
   @IsInt()
-  teamId?: number | null;
+  teamId?: string | null;
 }

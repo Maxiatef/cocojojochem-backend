@@ -84,7 +84,7 @@ export class ProductsService {
    * one level (enforced in CategoriesService), so one lookup is the whole
    * subtree; there is no recursion to do.
    */
-  private async categoryIdsFor(categoryId: number): Promise<number[]> {
+  private async categoryIdsFor(categoryId: string): Promise<string[]> {
     const children = await this.categoriesRepo.find({
       where: { parentId: categoryId },
       select: ['id'],
@@ -220,7 +220,7 @@ export class ProductsService {
    * Capped at 100: the parameter comes from a browser's localStorage, so the
    * length is not something the server should trust.
    */
-  async findPublicByIds(ids: number[]) {
+  async findPublicByIds(ids: string[]) {
     if (ids.length === 0) return [];
 
     const products = await this.applyPublicVisibility(this.baseQuery())
@@ -236,7 +236,21 @@ export class ProductsService {
       .map((p) => this.decorate(p));
   }
 
-  async findById(id: number) {
+  /**
+   * Staff lookup by slug, for the admin editor's URL.
+   *
+   * Separate from the public `findBySlug` on purpose: that one hides anything
+   * unpublished, scheduled or private, which is exactly the set an admin
+   * opens the editor to work on. This returns the record whatever its state,
+   * and the route carries the staff permission guard.
+   */
+  async findBySlugForStaff(slug: string) {
+    const product = await this.productsRepo.findOne({ where: { slug }, select: ['id'] });
+    if (!product) throw new NotFoundException(`Product "${slug}" not found`);
+    return this.findById(product.id);
+  }
+
+  async findById(id: string) {
     await this.autoPublishDueSchedules();
     const product = await this.productsRepo.findOne({
       where: { id },
@@ -266,7 +280,7 @@ export class ProductsService {
     page = 1,
     limit = 20,
     search?: string,
-    categoryId?: number,
+    categoryId?: string,
     functionSlug?: string,
     isPublished?: string,
     sort?: ProductSort,
@@ -490,7 +504,7 @@ export class ProductsService {
   // search: combines ts_rank on the generated search_vector, pg_trgm similarity
   // across the same fields, and an exact/prefix/contains match bonus ladder so
   // a literal SKU or name hit always outranks a fuzzy one.
-  async search(query: string, categoryId?: number, page = 1, limit = 20) {
+  async search(query: string, categoryId?: string, page = 1, limit = 20) {
     await this.autoPublishDueSchedules();
     const offset = (page - 1) * limit;
     const params: any[] = [query, query];
@@ -554,7 +568,7 @@ export class ProductsService {
       .orderBy('product.name', 'ASC')
       .getMany();
 
-    const grouped: Record<string, { id: number; name: string; slug: string }[]> = {};
+    const grouped: Record<string, { id: string; name: string; slug: string }[]> = {};
     for (const p of products) {
       const letter = p.name.charAt(0).toUpperCase();
       const key = /[A-Z]/.test(letter) ? letter : '#';
@@ -640,13 +654,13 @@ export class ProductsService {
 
   // Upsert (not delete-then-recreate) since ProductSeo is a single 1:1 row,
   // unlike the list-shaped variants/gallery/specs.
-  private async upsertSeo(productId: number, seo: NonNullable<CreateProductDto['seo']>) {
+  private async upsertSeo(productId: string, seo: NonNullable<CreateProductDto['seo']>) {
     const existing = await this.seoRepo.findOne({ where: { productId } });
     const merged = this.seoRepo.create({ ...existing, ...seo, productId });
     await this.seoRepo.save(merged);
   }
 
-  async update(id: number, dto: UpdateProductDto) {
+  async update(id: string, dto: UpdateProductDto) {
     const {
       variants,
       functionIds,
@@ -756,15 +770,15 @@ export class ProductsService {
    * bare DELETE and fires no entity event, so the audit log would never see
    * the removal.
    */
-  private async syncChildren<T extends ObjectLiteral & { id: number }>(
+  private async syncChildren<T extends ObjectLiteral & { id: string }>(
     repo: Repository<T>,
-    productId: number,
-    incoming: { id?: number }[],
+    productId: string,
+    incoming: { id?: string }[],
     toColumns: (row: any, index: number) => Record<string, unknown>,
   ): Promise<void> {
     const existing = await repo.findBy({ productId } as any);
     const byId = new Map(existing.map((row) => [row.id, row]));
-    const kept = new Set<number>();
+    const kept = new Set<string>();
 
     for (const [index, row] of incoming.entries()) {
       const columns = toColumns(row, index);
@@ -795,7 +809,7 @@ export class ProductsService {
    * product save that triggered it. The number is a cached convenience — the
    * editor recomputes it live from the same function either way.
    */
-  private async refreshSeoScore(productId: number): Promise<void> {
+  private async refreshSeoScore(productId: string): Promise<void> {
     try {
       const result = await this.seoAnalyzer.scoreSavedProduct(productId);
       if (!result) return;
@@ -819,7 +833,7 @@ export class ProductsService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const product = await this.productsRepo.findOne({ where: { id } });
     if (!product) throw new NotFoundException(`Product #${id} not found`);
     this.logger.log(`Product deleted: "${product.name}" (id=${product.id})`);

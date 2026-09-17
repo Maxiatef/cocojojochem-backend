@@ -1,5 +1,5 @@
 import { ContactMessageStatus } from '../../entities';
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -53,7 +53,7 @@ export class ContactMessagesController {
   @RequirePermission('canViewContactMessages')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.contactMessagesService.findOne(id);
   }
 
@@ -61,7 +61,7 @@ export class ContactMessagesController {
   @RequirePermission('canEditContactMessage')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateContactMessageStatusDto) {
+  updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateContactMessageStatusDto) {
     return this.contactMessagesService.updateStatus(id, dto.status);
   }
 
@@ -69,7 +69,7 @@ export class ContactMessagesController {
   @RequirePermission('canEditContactMessage')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  setReplied(@Param('id', ParseIntPipe) id: number, @Body() dto: SetRepliedDto) {
+  setReplied(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetRepliedDto) {
     return this.contactMessagesService.setReplied(id, dto.replied ?? true);
   }
 
@@ -77,7 +77,7 @@ export class ContactMessagesController {
   @RequirePermission('canDeleteContactMessage')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.contactMessagesService.remove(id);
   }
 }

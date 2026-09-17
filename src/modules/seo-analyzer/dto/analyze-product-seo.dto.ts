@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 /**
  * A product DRAFT to score. Every field is optional except the two the
@@ -7,8 +7,8 @@ import { IsInt, IsOptional, IsString, Min } from 'class-validator';
  */
 export class AnalyzeProductSeoDto {
   @IsOptional()
-  @IsInt()
-  productId?: number;
+  @IsUUID('4')
+  productId?: string;
 
   @IsString()
   name: string;

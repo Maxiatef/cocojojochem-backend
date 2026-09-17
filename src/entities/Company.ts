@@ -17,8 +17,8 @@ export enum AccountStatus {
 
 @Entity('companies')
 export class Company {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   name: string;
