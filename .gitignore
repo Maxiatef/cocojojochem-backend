@@ -5,3 +5,7 @@ dist
 uploads/**/*
 !uploads/**/.gitkeep
 
+# TypeScript's incremental build cache. Normally lands inside dist/
+# (already ignored), but a build with a different outDir puts one at the
+# repo root, so match it wherever it appears.
+*.tsbuildinfo
