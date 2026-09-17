@@ -179,7 +179,10 @@ export class AuthService {
     this.logger.log(
       `User logged in: ${user.email} (id=${user.id})`,
     );
-    await this.auditAuth(AuditAction.LOGIN, user, dto.email, `${user.email} signed in`);
+    // Successful sign-ins are deliberately not audited. Staff sign in several
+    // times a day, so the entries crowded out the changes the log exists to
+    // record, and "who was in the system" is answerable from what they did.
+    // Failures still are: a run of them is the thing worth seeing.
     return this.buildToken(user.id, user.email, user.roleId);
   }
 

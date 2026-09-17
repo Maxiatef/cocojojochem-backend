@@ -113,6 +113,12 @@ function logStartupBanner(port: number, requestedPort: number, bootMs: number) {
   else {
     logger.log(`JWT secret configured — ${process.env.JWT_SECRET.length} chars`);
   }
+  if (process.env.RUN_MIGRATIONS === 'true') {
+    logger.log('RUN_MIGRATIONS=true, running migrations on boot. This is not recommended in production.');
+  }
+  else {
+    logger.log('RUN_MIGRATIONS is not true, skipping migrations on boot. This is recommended in production.');
+  }
 }
 
 // Tries `startPort`, then startPort+1, startPort+2, ... until one binds
