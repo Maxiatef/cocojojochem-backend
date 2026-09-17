@@ -110,6 +110,9 @@ function logStartupBanner(port: number, requestedPort: number, bootMs: number) {
   if (!process.env.JWT_SECRET) {
     logger.error('JWT_SECRET is not set — falling back to the hardcoded default. Do NOT run like this outside local dev.');
   }
+  else {
+    logger.log(`JWT secret configured — ${process.env.JWT_SECRET.length} chars`);
+  }
 }
 
 // Tries `startPort`, then startPort+1, startPort+2, ... until one binds

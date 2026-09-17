@@ -22,6 +22,19 @@ import { isSaleActive } from '../../common/pricing.util';
 // against the database. Checkout never sent the flag at all, so trusting it
 // meant excludeSaleItems silently did nothing on a real order.
 
+/**
+ * Columns the coupon list may be ordered by.
+ *
+ * An allowlist rather than validation on the DTO: the value is concatenated
+ * into an ORDER BY clause, and anything reaching that clause unlisted is
+ * executable SQL.
+ */
+const SORTABLE_COLUMNS = [
+  'code', 'type', 'value', 'startDate', 'endDate',
+  'usageLimit', 'usageCount', 'isActive', 'createdAt',
+] as const;
+type SortableColumn = (typeof SORTABLE_COLUMNS)[number];
+
 function parseIds(value: string | null): string[] {
   if (!value) return [];
   try {
@@ -81,7 +94,13 @@ export class CouponsService {
       qb.andWhere('coupon.isActive = :isActive', { isActive: query.isActive === 'true' });
     }
 
-    const sortBy = query.sortBy || 'createdAt';
+    // Checked against a fixed list, never interpolated as given. TypeORM does
+    // NOT escape an unknown property here — it passes the string straight into
+    // the ORDER BY clause, so `?sortBy=id; DROP TABLE coupons CASCADE; --`
+    // reached the database as its own statement.
+    const sortBy = SORTABLE_COLUMNS.includes(query.sortBy as SortableColumn)
+      ? (query.sortBy as SortableColumn)
+      : 'createdAt';
     const sortOrder = query.sortOrder === 'ASC' ? 'ASC' : 'DESC';
     qb.orderBy(`coupon.${sortBy}`, sortOrder);
 
