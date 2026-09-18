@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { SeoMetric, SeoPage, Product, ProductSeo} from '../../entities';
+import { SeoMetric, SeoPage, Product, ProductSeo, Category, ProductVisibility } from '../../entities';
 import { analyzePageWithYoast } from './page-yoast.rules';
 import { SeoIssue, SeoIssueSeverity, SeoIssueType } from '../../entities/SeoIssue';
 import {
@@ -12,12 +12,74 @@ import {
   ProductSeoResult,
 } from './product-seo.rules';
 
-const KNOWN_TOP_LEVEL_PATHS = ['/', '/products', '/categories', '/functions', '/a-z'];
-const MAX_PATHS = 20;
+// Mirrors the static routes in frontend `src/app/sitemap.ts` — every page
+// Google is actually told about, minus the pages `robots.ts` disallows
+// (/admin, /account, /cart, /checkout). Keep the two lists in sync: a page
+// added to one belongs in the other.
+const KNOWN_STATIC_PATHS = [
+  '/',
+  '/products',
+  '/categories',
+  '/functions',
+  '/about',
+  '/contact',
+  '/quote-request',
+  '/legal/terms-of-service',
+  '/legal/privacy-policy',
+];
+
+/**
+ * The two pages that exist once as a template but many times as URLs.
+ *
+ * These are stored under the template path, not the sampled one. Listing
+ * every product by slug looked thorough and was actually worse: the table
+ * churned on every rename, publish and delete, 19 rows repeated what is one
+ * shared layout, and the crawl grew linearly with the catalogue. One sample
+ * answers the question this crawl is for — "does the product page template
+ * emit a good title, meta and heading structure" — and keeps answering it
+ * when the catalogue changes underneath.
+ *
+ * Per-product SEO is not lost by this: it is scored per record by
+ * `analyzeProduct()` and shown in the product editor, which is the right
+ * place for it because it works on an unsaved draft.
+ *
+ * The sample is the alphabetically first published record, so the same page
+ * is measured run after run and the score means something when compared with
+ * last week's. The row's stored `title` is the sampled page's real title, so
+ * which record produced the numbers stays visible.
+ */
+const PRODUCT_TEMPLATE_PATH = '/products/[slug]';
+const CATEGORY_TEMPLATE_PATH = '/categories/[slug]';
+
+// A safety net against a runaway crawl, not a real ceiling. The list is
+// bounded by design now, but an admin can register arbitrary extra paths.
+const MAX_PATHS = 500;
 const FETCH_DELAY_MS = 300;
 
+/**
+ * One page to crawl: the URL actually fetched, and the path it is filed
+ * under. They differ only for the templates above.
+ */
+interface CrawlTarget {
+  path: string;
+  url: string;
+}
+
 interface ExtractedPageData {
-  html?: string;
+  /**
+   * Body HTML with `script, style, nav, header, footer` already stripped —
+   * what gets handed to Yoast. Not the raw page: Yoast's own tooling only
+   * ever sees a WordPress post's content area, never a site's header or nav,
+   * so its "first paragraph", "subheading" and link/image research all
+   * assume they're reading article content. Handed the full page instead,
+   * they read whatever text comes first in the DOM — on every page here,
+   * that was the persistent top utility bar ("Your ingredient partner. From
+   * concept to scale."), not the page's own intro, and it was failing
+   * "keyphrase in introduction" no matter what the real intro paragraph
+   * said. `wordCount` below was already computed this way; this just makes
+   * the HTML handed to Yoast agree with it.
+   */
+  contentHtml?: string;
   title: string | null;
   metaDescription: string | null;
   h1Tag: string | null;
@@ -56,12 +118,70 @@ export class SeoAnalyzerService {
     private readonly seoIssueRepo: Repository<SeoIssue>,
     @InjectRepository(SeoPage)
     private readonly seoPageRepo: Repository<SeoPage>,
+    @InjectRepository(Category)
+    private readonly categoryRepo: Repository<Category>,
   ) {}
 
-  async getPathsToCrawl(): Promise<string[]> {
-    const seoPages = await this.seoPageRepo.find();
-    const combined = new Set<string>([...KNOWN_TOP_LEVEL_PATHS, ...seoPages.map((p) => p.path)]);
-    return Array.from(combined).slice(0, MAX_PATHS);
+  /**
+   * Every URL the crawler should score: the static marketing pages, plus one
+   * path per published product and per category that actually has published
+   * products, plus anything an admin has registered by hand in `seo_pages`
+   * (a landing page with no code route of its own).
+   *
+   * Sourced the same way `sitemap.ts` sources them on the frontend — the
+   * public visibility gate (`isPublished`, not scheduled for the future,
+   * `visibility = PUBLIC`) and "category has at least one published
+   * product" — so this list and what Google is actually told about never
+   * drift apart. Previously this was four hard-coded routes: real product
+   * and category pages were never crawled at all, which is why nothing under
+   * /products/[slug] or /categories/[slug] ever showed up here.
+   */
+  async getPathsToCrawl(): Promise<CrawlTarget[]> {
+    const [seoPages, sampleProduct, categories] = await Promise.all([
+      this.seoPageRepo.find(),
+      // Alphabetically first published product — the same one every run, so
+      // this week's score is comparable with last week's.
+      this.productsRepo
+        .createQueryBuilder('product')
+        .select(['product.slug'])
+        .where('product.isPublished = true')
+        .andWhere('(product.scheduledPublishAt IS NULL OR product.scheduledPublishAt <= NOW())')
+        .andWhere('product.visibility = :visibility', { visibility: ProductVisibility.PUBLIC })
+        .orderBy('product.name', 'ASC')
+        .getOne(),
+      this.categoryRepo
+        .createQueryBuilder('category')
+        .loadRelationCountAndMap('category.productCount', 'category.products', 'product', (qb) =>
+          qb.andWhere('product.isPublished = true'),
+        )
+        .orderBy('category.name', 'ASC')
+        .getMany(),
+    ]);
+
+    // A category with no published products renders an empty listing, which
+    // would score the empty state rather than the template.
+    const sampleCategory = categories.find(
+      (c) => ((c as Category & { productCount: number }).productCount ?? 0) > 0,
+    );
+
+    const targets: CrawlTarget[] = KNOWN_STATIC_PATHS.map((path) => ({ path, url: path }));
+
+    if (sampleProduct) {
+      targets.push({ path: PRODUCT_TEMPLATE_PATH, url: `/products/${sampleProduct.slug}` });
+    }
+    if (sampleCategory) {
+      targets.push({ path: CATEGORY_TEMPLATE_PATH, url: `/categories/${sampleCategory.slug}` });
+    }
+
+    // Anything an admin registered by hand, minus duplicates of the above.
+    const seen = new Set(targets.map((t) => t.path));
+    for (const page of seoPages) {
+      if (seen.has(page.path)) continue;
+      seen.add(page.path);
+      targets.push({ path: page.path, url: page.path });
+    }
+
+    return targets.slice(0, MAX_PATHS);
   }
 
   private async fetchAndExtract(path: string): Promise<ExtractedPageData> {
@@ -90,16 +210,33 @@ export class SeoAnalyzerService {
     const internalLinks = $('a[href^="/"]').length;
     const externalLinks = $('a[href^="http"]').length;
 
-    const images = $('img');
-    const imageCount = images.length;
+    // Decorative images are SUPPOSED to carry alt="" — the empty attribute is
+    // what tells a screen reader to skip them. Counting them as failures pushes
+    // authors to describe background art and to repeat a control's own label,
+    // both of which a screen reader then announces. They are excluded from the
+    // count rather than scored against it.
+    const contentImages = $('img').filter((_, el) => {
+      const $el = $(el);
+      const role = ($el.attr('role') || '').toLowerCase();
+      if (role === 'presentation' || role === 'none') return false;
+      if ($el.attr('aria-hidden') === 'true') return false;
+      // Hidden by an ancestor: a decorative layer stack marks the wrapper, not
+      // every image inside it.
+      if ($el.closest('[aria-hidden="true"]').length > 0) return false;
+      // Inside a control that already has an accessible name, alt text is read
+      // in addition to that name, not instead of it.
+      if ($el.closest('button[aria-label], a[aria-label]').length > 0) return false;
+      return true;
+    });
+    const imageCount = contentImages.length;
     let imagesWithAltText = 0;
-    images.each((_, el) => {
+    contentImages.each((_, el) => {
       const alt = $(el).attr('alt');
       if (alt && alt.trim().length > 0) imagesWithAltText++;
     });
 
     return {
-      html: response.data,
+      contentHtml: bodyClone.html() || '',
       title,
       metaDescription,
       h1Tag,
@@ -198,9 +335,18 @@ export class SeoAnalyzerService {
     return issues;
   }
 
-  private async analyzePath(path: string): Promise<{ metric: SeoMetric; issues: SeoIssue[] } | null> {
+  /**
+   * `path` is what the result is filed under; `url` is what gets fetched.
+   * They are the same for every real route and differ only for the two
+   * templates, where one sampled product/category page stands in for all of
+   * them.
+   */
+  private async analyzePath(
+    path: string,
+    url: string = path,
+  ): Promise<{ metric: SeoMetric; issues: SeoIssue[] } | null> {
     try {
-      const data = await this.fetchAndExtract(path);
+      const data = await this.fetchAndExtract(url);
       const seoScore = this.computeScore(data);
 
       // The page's own SEO override, if an admin has saved one. The keyphrase
@@ -212,7 +358,7 @@ export class SeoAnalyzerService {
       const override = await this.seoPageRepo.findOne({ where: { path } });
 
       const yoastResult = analyzePageWithYoast({
-        html: data.html || '<html></html>',
+        html: data.contentHtml || '<html></html>',
         title: data.title || undefined,
         metaDescription: data.metaDescription || undefined,
         focusKeyphrase: override?.focusKeyphrase || undefined,
@@ -254,25 +400,62 @@ export class SeoAnalyzerService {
 
       return { metric, issues };
     } catch (err) {
-      this.logger.error(`Failed to analyze path "${path}": ${err instanceof Error ? err.message : err}`);
+      // A 404 means the page is gone, not that the crawl had a bad day — so
+      // drop what we last knew about it. Without this a removed route keeps
+      // its final score in the admin table indefinitely, which is how "/a-z"
+      // went on reporting 712 words and a score of 84 after the page itself
+      // had stopped existing. Any other failure (timeout, connection refused,
+      // a 500) leaves the row alone: the page is probably still there and
+      // deleting real history over a transient blip is the worse trade.
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      if (status === 404 || status === 410) {
+        await this.seoMetricRepo.delete({ path });
+        await this.seoIssueRepo.delete({ path });
+        this.logger.warn(`Dropped "${path}" from SEO metrics — page returned ${status}`);
+      } else {
+        this.logger.error(
+          `Failed to analyze path "${path}": ${err instanceof Error ? err.message : err}`,
+        );
+      }
       return null;
     }
   }
 
   async analyzeAll() {
-    const paths = await this.getPathsToCrawl();
+    const targets = await this.getPathsToCrawl();
+    const paths = targets.map((t) => t.path);
+
+    // Rows for a path that is no longer in the crawl list — a route the site
+    // removed (this is what left "/a-z" showing in the admin table with its
+    // last good score, long after the page itself started 404ing), or the
+    // per-slug product rows from when this crawl listed every product
+    // individually. Deleted up front rather than only skipped going forward,
+    // so a stale result does not sit in the list forever.
+    if (paths.length) {
+      await this.seoMetricRepo
+        .createQueryBuilder()
+        .delete()
+        .where('path NOT IN (:...paths)', { paths })
+        .execute();
+      await this.seoIssueRepo
+        .createQueryBuilder()
+        .delete()
+        .where('path NOT IN (:...paths)', { paths })
+        .execute();
+    }
+
     const results: { metric: SeoMetric; issues: SeoIssue[] }[] = [];
 
-    for (const path of paths) {
-      const result = await this.analyzePath(path);
+    for (const target of targets) {
+      const result = await this.analyzePath(target.path, target.url);
       if (result) results.push(result);
       await sleep(FETCH_DELAY_MS);
     }
 
-    this.logger.log(`Analyzed ${results.length}/${paths.length} pages`);
+    this.logger.log(`Analyzed ${results.length}/${targets.length} pages`);
     return {
       analyzed: results.length,
-      total: paths.length,
+      total: targets.length,
       metrics: results.map((r) => r.metric),
       issues: results.flatMap((r) => r.issues),
     };

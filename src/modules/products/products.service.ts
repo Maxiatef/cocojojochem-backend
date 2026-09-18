@@ -14,6 +14,7 @@ import {
   DocType,
 } from '../../entities';
 import { withPricing } from '../../common/pricing.util';
+import { isUuid } from '../../common/uuid';
 import { CreateProductDto, CreateVariantDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductSort, QueryProductsDto } from './dto/query-products.dto';
@@ -498,6 +499,112 @@ export class ProductsService {
       .take(limit);
 
     return this.decorateAll(await qb.getMany());
+  }
+
+  /**
+   * Suggestions for a whole cart, for the checkout upsell.
+   *
+   * `findRelated` above answers "what else is like THIS product". A cart has
+   * several, so this takes the variants in it, resolves the products behind
+   * them, and looks for anything sharing a category, a function tag or a
+   * brand with ANY of them — then excludes everything already in the cart,
+   * because recommending what someone is about to buy is the one result that
+   * is certainly useless.
+   *
+   * Two deliberate choices:
+   *
+   * `ORDER BY random()` — a checkout upsell that shows the same three rows to
+   * the same person on every order stops being looked at. Randomising is also
+   * why this runs as a raw id query rather than through `baseQuery()`: that
+   * builder left-joins six collections, so TypeORM has to paginate it through
+   * a `SELECT DISTINCT` subquery, and Postgres rejects an ORDER BY expression
+   * that is not in a DISTINCT select list. Picking ids first sidesteps it.
+   *
+   * The top-up pass. A cart of one obscure material can easily have fewer
+   * than `limit` genuine matches, and a panel that renders one lonely card —
+   * or vanishes on some orders and not others — looks broken rather than
+   * curated. So the remainder is filled with published products (featured
+   * first), still excluding the cart.
+   */
+  async findCartSuggestions(variantIds: string[], limit = 3) {
+    await this.autoPublishDueSchedules();
+
+    // Malformed ids reach Postgres as a uuid[] cast and raise 22P02, which
+    // surfaces as a 500. A junk id is a bad request, not a server fault, and
+    // here it should simply not narrow the search.
+    const ids = variantIds.filter(isUuid);
+    if (!ids.length) return [];
+
+    const seeds: { id: string; categoryId: string | null; brand: string | null }[] =
+      await this.productsRepo.query(
+        `SELECT DISTINCT p.id, p."categoryId", p.brand
+           FROM product_variants v
+           JOIN products p ON p.id = v."productId"
+          WHERE v.id = ANY($1::uuid[])`,
+        [ids],
+      );
+    if (!seeds.length) return [];
+
+    const excludeIds = seeds.map((s) => s.id);
+    const categoryIds = [...new Set(seeds.map((s) => s.categoryId).filter(Boolean))] as string[];
+    const brands = [...new Set(seeds.map((s) => s.brand).filter(Boolean))] as string[];
+
+    const functionRows: { functionId: string }[] = await this.productsRepo.query(
+      `SELECT DISTINCT "functionId" FROM product_functions WHERE "productId" = ANY($1::uuid[])`,
+      [excludeIds],
+    );
+    const functionIds = functionRows.map((r) => r.functionId);
+
+    const VISIBLE = `p."isPublished" = true
+       AND (p."scheduledPublishAt" IS NULL OR p."scheduledPublishAt" <= NOW())
+       AND p."visibility" = 'PUBLIC'
+       AND p.id <> ALL($1::uuid[])`;
+
+    const matched: { id: string }[] = await this.productsRepo.query(
+      `SELECT p.id
+         FROM products p
+        WHERE ${VISIBLE}
+          AND (
+            ($2::uuid[] <> '{}' AND p."categoryId" = ANY($2::uuid[]))
+            OR ($3::text[] <> '{}' AND p.brand = ANY($3::text[]))
+            OR ($4::uuid[] <> '{}' AND EXISTS (
+                  SELECT 1 FROM product_functions pf
+                   WHERE pf."productId" = p.id AND pf."functionId" = ANY($4::uuid[])))
+          )
+        ORDER BY random()
+        LIMIT $5`,
+      [excludeIds, categoryIds, brands, functionIds, limit],
+    );
+
+    let pickedIds = matched.map((r) => r.id);
+
+    if (pickedIds.length < limit) {
+      const fillers: { id: string }[] = await this.productsRepo.query(
+        `SELECT p.id
+           FROM products p
+          WHERE ${VISIBLE}
+            AND p.id <> ALL($2::uuid[])
+          ORDER BY p."isFeatured" DESC, random()
+          LIMIT $3`,
+        [excludeIds, pickedIds, limit - pickedIds.length],
+      );
+      pickedIds = pickedIds.concat(fillers.map((r) => r.id));
+    }
+
+    if (!pickedIds.length) return [];
+
+    // Loaded through the normal builder so the cards get the same shape every
+    // other product endpoint returns — variants, category, pricing.
+    const products = await this.applyPublicVisibility(this.baseQuery())
+      .andWhere('product.id IN (:...pickedIds)', { pickedIds })
+      .getMany();
+
+    // `IN` does not preserve order, and the random ordering above is the
+    // whole point, so restore it here.
+    const order = new Map(pickedIds.map((id, i) => [id, i]));
+    products.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+    return this.decorateAll(products);
   }
 
   // Ranked full-text + trigram search, ported from the real cocojojo.com wholesale

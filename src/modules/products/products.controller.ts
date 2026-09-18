@@ -113,6 +113,26 @@ export class ProductsController {
     );
   }
 
+  // Checkout upsell: "you may also need" for the cart as a whole, rather than
+  // for one product. Takes the cart's variant ids because that is what both
+  // carts (guest localStorage and the server cart) hold. Declared above
+  // ':slug' or it is swallowed as a slug value.
+  //
+  // Capped at 12 server-side: the limit is a query string, and an uncapped one
+  // turns a public endpoint into "select the whole catalogue with its six
+  // joined collections".
+  @Get('cart-suggestions')
+  findCartSuggestions(@Query('variantIds') variantIds?: string, @Query('limit') limit = '3') {
+    const parsed = Number(limit);
+    return this.productsService.findCartSuggestions(
+      (variantIds || '')
+        .split(',')
+        .map((raw) => raw.trim())
+        .filter((raw) => UUID_RE.test(raw)),
+      Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 12) : 3,
+    );
+  }
+
   // swallowed as a slug value.
   // Staff-only: returns the full record regardless of publish state, and is
   // only ever called by the admin product view/editor. Left public it leaked
