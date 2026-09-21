@@ -63,6 +63,18 @@ export class SeoMetric {
   yoastChecks: any | null;
 
   /**
+   * Why the Yoast pass produced nothing, when it produced nothing.
+   *
+   * The scores next to it are nullable so "not analyzed" is expressible, but
+   * a NULL on its own does not say why — and the reason has so far only
+   * existed in a server log, which is exactly where nobody looks when a
+   * dashboard says "—". Stored so the admin panel can answer the question
+   * itself. NULL whenever the analysis succeeded.
+   */
+  @Column({ type: 'text', nullable: true })
+  yoastError: string | null;
+
+  /**
    * Assessments Yoast returned that were excluded as inapplicable — the
    * keyphrase family, which a crawled page has no field for. Stored so the UI
    * can say so out loud rather than quietly showing a shorter list.

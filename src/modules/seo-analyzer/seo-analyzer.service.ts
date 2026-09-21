@@ -392,6 +392,7 @@ export class SeoAnalyzerService {
         seoProblems: yoastResult.seoProblems,
         readabilityProblems: yoastResult.readabilityProblems,
         yoastChecks: yoastResult.error ? null : yoastResult.checks,
+        yoastError: yoastResult.error ?? null,
         skippedChecks: yoastResult.skippedChecks,
         lastAnalyzed: now,
       });

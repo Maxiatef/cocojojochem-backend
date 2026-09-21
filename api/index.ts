@@ -28,6 +28,52 @@ import { configureApp } from '../src/app-config';
  */
 const server = express();
 
+/**
+ * Last-resort crash logging.
+ *
+ * Nest's exception filter turns a throw inside a handler into a 500 with a
+ * body, and the bootstrap catch below does the same for a failed start. So
+ * anything that reaches HERE escaped the request lifecycle entirely — a
+ * rejected promise nobody awaited, or an 'error' event on a socket or a
+ * database connection with no listener. Node kills the process for those, and
+ * the platform reports it as a bare "Node.js process exited with exit status:
+ * 1" with no indication of what happened, which is indistinguishable from the
+ * function being killed for any other reason.
+ *
+ * These handlers do not make the process survive — swallowing an uncaught
+ * exception leaves it in an unknown state, which is worse than a restart. They
+ * exist purely so the cause is printed before it dies.
+ */
+let crashLoggerInstalled = false;
+function installCrashLogging() {
+  if (crashLoggerInstalled) return;
+  crashLoggerInstalled = true;
+
+  process.on('uncaughtException', (err) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[fatal] uncaughtException${
+        (err as NodeJS.ErrnoException)?.code ? ` [${(err as NodeJS.ErrnoException).code}]` : ''
+      }: ${err?.message}`,
+      err?.stack,
+    );
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    // eslint-disable-next-line no-console
+    console.error(
+      `[fatal] unhandledRejection${
+        (err as NodeJS.ErrnoException)?.code ? ` [${(err as NodeJS.ErrnoException).code}]` : ''
+      }: ${err.message}`,
+      err.stack,
+    );
+    process.exit(1);
+  });
+}
+installCrashLogging();
+
 // Built once per cold start and reused for every request that instance
 // serves. Holding the promise rather than a boolean matters: two requests can
 // arrive before the first bootstrap resolves, and awaiting the same promise
