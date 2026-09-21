@@ -56,9 +56,19 @@ Understand these before pointing anything real at it:
    throws `ERR_REQUIRE_ESM`, and because the engine is loaded lazily the throw
    is contained to the analyze endpoint instead of killing the boot.
 
-   `engines.node` is pinned to `22.x` for this reason. **A Node.js Version set
-   in Vercel's Project Settings can win over it** — if this error persists
-   after a deploy, that setting is the first place to look.
+   **The fix applied is an npm `overrides` entry pinning parse5 to `6.0.1`
+   for yoastseo only** — the last major that ships CommonJS. yoastseo uses
+   exactly one function from it, `parseFragment`, and a full assessment run
+   was compared across both versions: all 16 SEO and 6 readability
+   assessments return byte-identical scores, so this is a packaging change
+   and not a behavioural one. It is scoped to `yoastseo`; cheerio keeps its
+   own parse5, which the crawler depends on.
+
+   This was chosen over relying on the runtime because it works on any Node
+   version and needs nothing configured on the host. `engines.node` is still
+   pinned to `22.x` as a second line of defence — note that **a Node.js
+   Version set in Vercel's Project Settings can win over it**, which is why
+   pinning the runtime alone was not enough here.
 
    The failure is quiet by design: the crawl still completes and titles, word
    counts and meta descriptions all save correctly. Only the scores are

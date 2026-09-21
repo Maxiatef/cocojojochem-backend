@@ -49,6 +49,11 @@
     "typeorm": "^0.3.20",
     "yoastseo": "^3.6.0"
   },
+  "overrides": {
+    "yoastseo": {
+      "parse5": "6.0.1"
+    }
+  },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",
     "@nestjs/schematics": "^10.1.4",
