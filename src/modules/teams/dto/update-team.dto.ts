@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class UpdateTeamDto {
   @IsString()
@@ -9,7 +9,7 @@ export class UpdateTeamDto {
   @IsOptional()
   description?: string | null;
 
-  @IsInt()
+  @IsUUID()
   @IsOptional()
   managerId?: string | null;
 

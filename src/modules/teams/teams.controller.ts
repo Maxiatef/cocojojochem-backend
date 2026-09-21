@@ -22,6 +22,7 @@ import { TeamsService } from './teams.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { SetTeamMembersDto } from './dto/team-members.dto';
+import { MyTeamActivityDto, MyTeamQueryDto } from './dto/my-team-query.dto';
 import { TeamReportDto } from './dto/team-report.dto';
 
 /**
@@ -71,16 +72,38 @@ export class TeamsController {
   // Declared before the ':id' routes — 'my-team' would otherwise be swallowed
   // as an id and rejected by ParseUUIDPipe.
 
+  /**
+   * Every team this person manages, for the switcher at the top of the page.
+   *
+   * Declared before 'my-team' only for readability; the paths do not collide.
+   */
+  @Get('my-teams')
+  @RequirePermission('canViewOwnTeam')
+  myTeams(@Req() req: any) {
+    return this.teamsService.myTeams(req.user.id);
+  }
+
+  /**
+   * `teamId` is optional on all four of these and means "which of MY teams".
+   * It is not an escape hatch: the service pins every lookup to the caller —
+   * by `managerId`, or by the `teamId` on their own user row — so an id from
+   * anywhere else 403s. Left out, the caller gets their first team.
+   *
+   * This route alone also answers for a plain MEMBER of a team, who gets the
+   * roster and a `viewerRole` of MEMBER. The other three stay manager-only
+   * through resolveManagedTeam: a member does not read their colleagues'
+   * activity, does not read the report, and does not edit the roster.
+   */
   @Get('my-team')
   @RequirePermission('canViewOwnTeam')
-  myTeam(@Req() req: any) {
-    return this.teamsService.myTeam(req.user.id);
+  myTeam(@Req() req: any, @Query() query: MyTeamQueryDto) {
+    return this.teamsService.myTeam(req.user.id, query.teamId);
   }
 
   /** The team's full activity feed — every record type, not just team-owned ones. */
   @Get('my-team/activity')
   @RequirePermission('canViewOwnTeam')
-  myTeamActivity(@Req() req: any, @Query() query: QueryAuditLogsDto) {
+  myTeamActivity(@Req() req: any, @Query() query: MyTeamActivityDto) {
     return this.teamsService.myTeamActivity(req.user.id, query);
   }
 
@@ -99,7 +122,7 @@ export class TeamsController {
   @Put('my-team/members')
   @RequirePermission('canManageOwnTeam')
   setOwnMembers(@Req() req: any, @Body() dto: SetTeamMembersDto) {
-    return this.teamsService.setOwnTeamMembers(req.user.id, dto.memberIds);
+    return this.teamsService.setOwnTeamMembers(req.user.id, dto.memberIds, dto.teamId);
   }
 
   // ------------------------------------------------------- admin: any team

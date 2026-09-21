@@ -382,11 +382,16 @@ export class SeoAnalyzerService {
         imagesWithAltText: data.imagesWithAltText,
         pageLoadTimeMs: data.pageLoadTimeMs,
         seoScore,
-        yoastSeoScore: yoastResult.seoScore,
-        readabilityScore: yoastResult.readabilityScore,
+        // NULL, not 0, when the engine could not run — the columns are
+        // nullable precisely so "not analyzed" is expressible. Zero would be
+        // a claim about the page, it would drag the site average down, and it
+        // would take precedence over the legacy seoScore in the `??` chain
+        // that computes that average.
+        yoastSeoScore: yoastResult.error ? null : yoastResult.seoScore,
+        readabilityScore: yoastResult.error ? null : yoastResult.readabilityScore,
         seoProblems: yoastResult.seoProblems,
         readabilityProblems: yoastResult.readabilityProblems,
-        yoastChecks: yoastResult.checks,
+        yoastChecks: yoastResult.error ? null : yoastResult.checks,
         skippedChecks: yoastResult.skippedChecks,
         lastAnalyzed: now,
       });

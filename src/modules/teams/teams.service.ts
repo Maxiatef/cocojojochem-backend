@@ -14,6 +14,7 @@ import { QueryAuditLogsDto } from '../audit-log/dto/query-audit-logs.dto';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { TeamReportDto } from './dto/team-report.dto';
+import { MyTeamActivityDto } from './dto/my-team-query.dto';
 
 /** Default report window when the caller gives no dates. */
 const DEFAULT_REPORT_DAYS = 30;
@@ -209,6 +210,22 @@ export class TeamsService {
       relations: ['role', 'team'],
       order: { fullName: 'ASC' },
     });
+
+    // Which teams each person already manages. A list rather than a boolean
+    // because the manager picker shows it back: naming someone to a second
+    // team is allowed, but it should be a decision, not a silent side effect.
+    const managed = await this.teamsRepo.find({
+      where: { managerId: Not(IsNull()) },
+      select: ['id', 'name', 'managerId'],
+      order: { name: 'ASC' },
+    });
+    const managedBy = new Map<string, { id: string; name: string }[]>();
+    for (const t of managed) {
+      const list = managedBy.get(t.managerId!) ?? [];
+      list.push({ id: t.id, name: t.name });
+      managedBy.set(t.managerId!, list);
+    }
+
     return staff.map((u) => ({
       id: u.id,
       fullName: u.fullName,
@@ -216,6 +233,14 @@ export class TeamsService {
       roleName: u.role?.name ?? null,
       teamId: u.teamId,
       teamName: u.team?.name ?? null,
+      // Being named a manager grants nothing on its own — the role's
+      // permissions do. Someone with neither of these would be handed a team
+      // they cannot open, so the manager picker offers only the accounts for
+      // which the assignment actually means something.
+      canManageTeam:
+        u.role?.permissions?.canViewOwnTeam === true ||
+        u.role?.permissions?.canManageOwnTeam === true,
+      managesTeams: managedBy.get(u.id) ?? [],
     }));
   }
 
@@ -229,15 +254,124 @@ export class TeamsService {
    * another team by changing an id in a URL. Every manager-facing route goes
    * through it.
    */
-  async resolveManagedTeam(userId: string): Promise<Team> {
+  async resolveManagedTeam(userId: string, teamId?: string): Promise<Team> {
+    // `managerId: userId` is in the where clause whether or not a teamId was
+    // supplied, and that is the entire security model. A manager passing
+    // someone else's team id matches no row and gets a 403 — the id narrows
+    // the search, it never widens it.
+    //
+    // Omitted, it falls back to their first team by name, which is what a
+    // manager of exactly one team always gets. Ordering matters only for
+    // someone over several teams opening the page with no selection yet: they
+    // land on the same one every time rather than on whatever the planner
+    // returned first.
     const team = await this.teamsRepo.findOne({
-      where: { managerId: userId },
+      where: teamId ? { id: teamId, managerId: userId } : { managerId: userId },
       relations: ['manager'],
+      order: { name: 'ASC' },
     });
     if (!team) {
-      throw new ForbiddenException('You are not the manager of a team.');
+      throw new ForbiddenException(
+        teamId
+          ? 'You are not the manager of that team.'
+          : 'You are not the manager of a team.',
+      );
     }
     return team;
+  }
+
+  /**
+   * The team this user may LOOK AT: the one they manage, or failing that, the
+   * one they are in.
+   *
+   * Deliberately separate from resolveManagedTeam, which stays manager-only
+   * and still guards activity, the report and every roster write. A member
+   * gets the roster and nothing else, so the two resolvers must not be merged
+   * — the difference between them is the whole of the member/manager split.
+   *
+   * Both branches pin the lookup to this user: a managed team by
+   * `managerId`, their own team by the `teamId` on their row. A `teamId`
+   * argument can only ever select between those, never reach outside them.
+   */
+  async resolveViewableTeam(
+    userId: string,
+    teamId?: string,
+  ): Promise<{ team: Team; viewerRole: 'MANAGER' | 'MEMBER' }> {
+    const managed = await this.teamsRepo.findOne({
+      where: teamId ? { id: teamId, managerId: userId } : { managerId: userId },
+      relations: ['manager'],
+      order: { name: 'ASC' },
+    });
+    if (managed) return { team: managed, viewerRole: 'MANAGER' };
+
+    const user = await this.usersRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'teamId'],
+    });
+    if (user?.teamId && (!teamId || teamId === user.teamId)) {
+      const own = await this.teamsRepo.findOne({
+        where: { id: user.teamId },
+        relations: ['manager'],
+      });
+      if (own) return { team: own, viewerRole: 'MEMBER' };
+    }
+
+    throw new ForbiddenException(
+      teamId
+        ? 'You are not the manager or a member of that team.'
+        : 'You are not in a team yet.',
+    );
+  }
+
+  /**
+   * Every team this person manages — the data behind the team switcher.
+   *
+   * Returns `[]` rather than throwing, unlike resolveManagedTeam: "you manage
+   * nothing" is a fine answer to "what do you manage", and the page renders
+   * its own explanation for it.
+   */
+  async myTeams(userId: string) {
+    let teams = await this.teamsRepo.find({
+      where: { managerId: userId },
+      select: ['id', 'name', 'description'],
+      order: { name: 'ASC' },
+    });
+
+    // A member manages nothing but is still in one team, and the page needs a
+    // name for it. Managers who are also a member of some other team keep
+    // their managed list only — mixing the two would put a team they cannot
+    // act on into the same switcher as the ones they can.
+    if (teams.length === 0) {
+      const user = await this.usersRepo.findOne({
+        where: { id: userId },
+        select: ['id', 'teamId'],
+      });
+      teams = user?.teamId
+        ? await this.teamsRepo.find({
+            where: { id: user.teamId },
+            select: ['id', 'name', 'description'],
+          })
+        : [];
+    }
+
+    if (teams.length === 0) return [];
+
+    const counts = await this.usersRepo
+      .createQueryBuilder('user')
+      .select('user.teamId', 'teamId')
+      .addSelect('COUNT(*)', 'count')
+      .where('user.teamId IN (:...ids)', { ids: teams.map((t) => t.id) })
+      .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
+      .groupBy('user.teamId')
+      .getRawMany<{ teamId: string; count: string }>();
+    const byTeam = new Map(counts.map((c) => [String(c.teamId), Number(c.count)]));
+
+    return teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      memberCount: byTeam.get(t.id) ?? 0,
+    }));
   }
 
   /** Active member ids of a team. `[]` for an empty team — never "everyone". */
@@ -253,9 +387,16 @@ export class TeamsService {
    * A manager's landing view: the team, its members, and how active each
    * member has been.
    */
-  async myTeam(userId: string) {
-    const team = await this.resolveManagedTeam(userId);
-    return this.teamOverview(team);
+  async myTeam(userId: string, teamId?: string) {
+    const { team, viewerRole } = await this.resolveViewableTeam(userId, teamId);
+    // A member sees who is on the team and who runs it. They do not see how
+    // many actions each colleague has recorded or when each was last active —
+    // that is the manager's report, and handing it to everyone on the team
+    // turns a reporting tool into peer surveillance.
+    return {
+      ...(await this.teamOverview(team, viewerRole === 'MANAGER')),
+      viewerRole,
+    };
   }
 
   /**
@@ -265,20 +406,20 @@ export class TeamsService {
    * needs to see that a member edited a product or a coupon just as much as an
    * order. Scope comes from *who acted*, never from what they acted on.
    */
-  async myTeamActivity(userId: string, query: QueryAuditLogsDto) {
-    const team = await this.resolveManagedTeam(userId);
+  async myTeamActivity(userId: string, query: MyTeamActivityDto) {
+    const team = await this.resolveManagedTeam(userId, query.teamId);
     const memberIds = await this.memberIdsOf(team.id);
     return this.auditLog.findAll(query, memberIds);
   }
 
   async myTeamReport(userId: string, dto: TeamReportDto) {
-    const team = await this.resolveManagedTeam(userId);
+    const team = await this.resolveManagedTeam(userId, dto.teamId);
     return this.buildReport(team, dto);
   }
 
   /** Lets a manager edit their own roster without granting canManageTeams. */
-  async setOwnTeamMembers(userId: string, memberIds: string[]) {
-    const team = await this.resolveManagedTeam(userId);
+  async setOwnTeamMembers(userId: string, memberIds: string[], teamId?: string) {
+    const team = await this.resolveManagedTeam(userId, teamId);
     return this.setMembers(team.id, memberIds);
   }
 
@@ -305,14 +446,18 @@ export class TeamsService {
 
   // ------------------------------------------------------------ internals
 
-  private async teamOverview(team: Team) {
+  private async teamOverview(team: Team, includeActivity = true) {
     const members = await this.usersRepo.find({
       where: { teamId: team.id, status: UserStatus.ACTIVE },
       relations: ['role'],
       order: { fullName: 'ASC' },
     });
 
-    const activity = await this.activityTotals(members.map((m) => m.id));
+    // Not merely hidden in the response — the query is not run at all, so the
+    // numbers never leave the database on a member's request.
+    const activity = includeActivity
+      ? await this.activityTotals(members.map((m) => m.id))
+      : new Map<string, { count: number; lastActiveAt: Date | null }>();
 
     const summaries: TeamMemberSummary[] = members.map((m) => ({
       id: m.id,

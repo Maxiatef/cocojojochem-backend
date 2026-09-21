@@ -1,6 +1,9 @@
 {
   "name": "cocojojochem-backend",
   "version": "0.1.0",
+  "engines": {
+    "node": "22.x"
+  },
   "description": "CocoJojoChem wholesale backend API",
   "private": true,
   "license": "UNLICENSED",

@@ -1,4 +1,4 @@
-import { IsArray, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateTeamDto {
   @IsString()
@@ -10,7 +10,7 @@ export class CreateTeamDto {
   description?: string;
 
   /** Null creates a team with no manager yet — valid, and sometimes the order things happen in. */
-  @IsInt()
+  @IsUUID()
   @IsOptional()
   managerId?: string | null;
 

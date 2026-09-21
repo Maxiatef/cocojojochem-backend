@@ -43,11 +43,37 @@ Understand these before pointing anything real at it:
    connection-string change rather than a code change — or a long-lived host
    where one process owns one pool (see [Deploying to
    Render](#deploying-to-render-the-long-term-path)).
-4. **The SEO analyzer will fail if called.** `yoastseo` require()s a parse5
-   that ships ESM-only, which throws `ERR_REQUIRE_ESM` under this runtime. The
-   engine is loaded lazily, so this is now contained to the analyze endpoints
-   rather than killing the process on boot — but running an analysis there
-   will error.
+4. **The SEO analyzer does not produce scores here — cause not yet
+   identified.** The crawl itself completes: titles, meta descriptions, word
+   counts and image counts all save correctly. Only the `yoastseo` step fails,
+   for every page, and it fails inside the try/catch in
+   `page-yoast.rules.ts`.
+
+   Two theories have been *checked and ruled out*, so nobody repeats the work:
+
+   - **Not `ERR_REQUIRE_ESM`.** An earlier version of this note blamed the
+     ESM-only parse5 that `yoastseo` depends on. Tracing `Module._load`
+     through a full `SeoAssessor` + `ContentAssessor` run shows parse5 is
+     never loaded at all, on either path.
+   - **Not untraceable requires.** Every `require()` in `yoastseo/build` takes
+     a literal string, and the 343 files it reads at runtime are all reachable
+     by static analysis, so a bundler dropping them is unlikely.
+
+   `engines.node` is pinned to `22.x` so the deployed runtime matches the one
+   this is developed against. That removes a variable; it is not known to be
+   the fix.
+
+   The failure now saves as NULL rather than 0, so the admin panel says "not
+   analyzed" instead of showing eleven pages that all apparently scored zero —
+   and the error code and stack are logged. **The next step is to read that
+   line in the Vercel function logs:**
+
+   ```
+   Yoast page analysis failed for "/about" [CODE]: message
+   ```
+
+   Whatever `CODE` turns out to be is the actual answer. Until someone has
+   read it, anything else in this bullet is a guess.
 5. **Cold starts are slow.** Nest builds the module graph, connects TypeORM,
    runs the role permission reconcile and generates the Swagger document on
    every one. Expect a few seconds on the first request after a quiet period.

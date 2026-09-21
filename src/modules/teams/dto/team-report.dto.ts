@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 
 // All-optional strings, coerced in the service — the same convention as
 // QueryUsersDto and QueryAuditLogsDto, so a malformed date degrades to the
@@ -13,4 +13,9 @@ export class TeamReportDto {
   @IsOptional()
   @IsString()
   to?: string;
+
+  /** Which managed team, when the caller manages more than one. See MyTeamQueryDto. */
+  @IsOptional()
+  @IsUUID()
+  teamId?: string;
 }

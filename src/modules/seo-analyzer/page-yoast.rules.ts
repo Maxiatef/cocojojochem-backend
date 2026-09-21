@@ -53,6 +53,15 @@ export interface PageYoastCheck {
 }
 
 export interface PageYoastResult {
+  /**
+   * Set only when the engine could not run at all.
+   *
+   * It exists so a failure is not stored as a score of 0. Those are two very
+   * different statements — "this page scores nothing" versus "nobody looked" —
+   * and collapsing them made a broken deploy read as eleven perfectly crawled
+   * pages that all scored zero, which is exactly how this went unnoticed.
+   */
+  error?: string;
   /** 0-100, computed from the applicable checks only. */
   seoScore: number;
   readabilityScore: number;
@@ -219,13 +228,21 @@ export function analyzePageWithYoast(input: PageYoastInput): PageYoastResult {
       ),
     };
   } catch (err) {
-    // A crawl must survive a broken page. Returning empty means the row still
-    // saves with its other metrics and the failure is visible in the log.
+    // A crawl must survive a broken page: the row still saves with its other
+    // metrics. But it saves with NULL scores, not zeros — see
+    // PageYoastResult.error.
+    //
+    // The code and the stack are logged, not just the message, because the
+    // failures worth catching here are environmental rather than per-page:
+    // MODULE_NOT_FOUND when a bundler did not trace yoastseo's language data
+    // into the deployment, or ERR_REQUIRE_ESM from the parse5 it pulls in.
+    // Both produce the same useless "failed" line without the code.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const message = err instanceof Error ? err.message : String(err);
     console.error(
-      `Yoast page analysis failed for "${input.path}": ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      `Yoast page analysis failed for "${input.path}"${code ? ` [${code}]` : ''}: ${message}`,
+      err instanceof Error ? err.stack : undefined,
     );
-    return EMPTY;
+    return { ...EMPTY, error: code ? `${code}: ${message}` : message };
   }
 }
