@@ -33,6 +33,29 @@ import { UpdateUserDto } from './dto/update-user.dto';
 // expires is a permanent account takeover sitting in an inbox.
 const ADMIN_RESET_LINK_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * Pulls the real ids out of a comma-separated filter, discarding the word
+ * sentinels ("none", "staff") that the same parameter also carries.
+ *
+ * These ids are UUIDs. They were SERIAL integers until the UuidPrimaryKeys
+ * migration, and the filters below kept testing `/^\d+$/` afterwards — so
+ * every id was discarded, no WHERE clause was ever added, and `?roleId=<uuid>`
+ * silently returned EVERY user instead of erroring. That is what made the
+ * Roles tab's "who holds this role" list show the whole directory.
+ *
+ * Anything that is not a UUID is dropped rather than passed through, because
+ * a non-uuid reaching a `uuid = $1` comparison is a Postgres cast error (500),
+ * not an empty result.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function idsFrom(csv: string): string[] {
+  return csv
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => UUID_RE.test(p));
+}
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger('Users');
@@ -155,7 +178,7 @@ export class UsersService {
       const parts = query.roleId.split(',').map((r) => r.trim()).filter(Boolean);
       const wantsNone = parts.includes('none');
       const wantsStaff = parts.includes('staff');
-      const ids = parts.filter((p) => /^\d+$/.test(p)).map(Number);
+      const ids = idsFrom(query.roleId);
       if (wantsStaff && !wantsNone) {
         qb.andWhere('user.roleId IS NOT NULL');
       } else if (wantsNone && ids.length) {
@@ -169,7 +192,7 @@ export class UsersService {
     if (query.teamId) {
       const parts = query.teamId.split(',').map((t) => t.trim()).filter(Boolean);
       const wantsNone = parts.includes('none');
-      const ids = parts.filter((p) => /^\d+$/.test(p)).map(Number);
+      const ids = idsFrom(query.teamId);
       if (wantsNone && ids.length) {
         qb.andWhere('(user.teamId IN (:...teamIds) OR user.teamId IS NULL)', { teamIds: ids });
       } else if (wantsNone) {
