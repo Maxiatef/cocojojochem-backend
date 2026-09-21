@@ -239,10 +239,17 @@ export function analyzePageWithYoast(input: PageYoastInput): PageYoastResult {
     // Both produce the same useless "failed" line without the code.
     const code = (err as NodeJS.ErrnoException)?.code;
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      `Yoast page analysis failed for "${input.path}"${code ? ` [${code}]` : ''}: ${message}`,
-      err instanceof Error ? err.stack : undefined,
-    );
-    return { ...EMPTY, error: code ? `${code}: ${message}` : message };
+
+    // The Node version is part of the error, not a separate log line, because
+    // the one failure this reliably hits is version-dependent:
+    // ERR_REQUIRE_ESM. yoastseo require()s parse5, which ships ESM-only, and
+    // require() of ESM is only allowed from Node 22.12 (and 20.19). Printing
+    // the running version next to the code turns "did the runtime pin
+    // actually take effect on the host?" from a guess into something the
+    // admin panel answers by itself.
+    const where = `${code ? `${code}: ` : ''}${message} (node ${process.version})`;
+    console.error(`Yoast page analysis failed for "${input.path}" — ${where}`,
+      err instanceof Error ? err.stack : undefined);
+    return { ...EMPTY, error: where };
   }
 }

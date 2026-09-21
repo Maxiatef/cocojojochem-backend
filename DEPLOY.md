@@ -43,37 +43,37 @@ Understand these before pointing anything real at it:
    connection-string change rather than a code change — or a long-lived host
    where one process owns one pool (see [Deploying to
    Render](#deploying-to-render-the-long-term-path)).
-4. **The SEO analyzer does not produce scores here — cause not yet
-   identified.** The crawl itself completes: titles, meta descriptions, word
-   counts and image counts all save correctly. Only the `yoastseo` step fails,
-   for every page, and it fails inside the try/catch in
-   `page-yoast.rules.ts`.
-
-   Two theories have been *checked and ruled out*, so nobody repeats the work:
-
-   - **Not `ERR_REQUIRE_ESM`.** An earlier version of this note blamed the
-     ESM-only parse5 that `yoastseo` depends on. Tracing `Module._load`
-     through a full `SeoAssessor` + `ContentAssessor` run shows parse5 is
-     never loaded at all, on either path.
-   - **Not untraceable requires.** Every `require()` in `yoastseo/build` takes
-     a literal string, and the 343 files it reads at runtime are all reachable
-     by static analysis, so a bundler dropping them is unlikely.
-
-   `engines.node` is pinned to `22.x` so the deployed runtime matches the one
-   this is developed against. That removes a variable; it is not known to be
-   the fix.
-
-   The failure now saves as NULL rather than 0, so the admin panel says "not
-   analyzed" instead of showing eleven pages that all apparently scored zero —
-   and the error code and stack are logged. **The next step is to read that
-   line in the Vercel function logs:**
+4. **The SEO analyzer needs Node >= 22.12 (or >= 20.19).** Confirmed from a
+   production log, not inferred:
 
    ```
-   Yoast page analysis failed for "/about" [CODE]: message
+   Yoast page analysis failed for "/categories/[slug]" [ERR_REQUIRE_ESM]: ...
    ```
 
-   Whatever `CODE` turns out to be is the actual answer. Until someone has
-   read it, anything else in this bullet is a guess.
+   `yoastseo/build/parse/build/build.js` does `require("parse5")`, and the
+   parse5 it bundles (8.0.1) is `"type": "module"`. Node only permits
+   `require()` of an ESM module from 22.12, backported to 20.19. Below that it
+   throws `ERR_REQUIRE_ESM`, and because the engine is loaded lazily the throw
+   is contained to the analyze endpoint instead of killing the boot.
+
+   `engines.node` is pinned to `22.x` for this reason. **A Node.js Version set
+   in Vercel's Project Settings can win over it** — if this error persists
+   after a deploy, that setting is the first place to look.
+
+   The failure is quiet by design: the crawl still completes and titles, word
+   counts and meta descriptions all save correctly. Only the scores are
+   missing, and they save as NULL rather than 0 so the panel shows "—" instead
+   of eleven pages that apparently scored zero. The reason is stored on
+   `seo_metrics.yoastError` and shown in the expanded row of the admin panel,
+   with the running Node version appended — so the panel itself says whether
+   the runtime pin took effect.
+
+   Two dead ends, recorded so nobody repeats them: every `require()` inside
+   `yoastseo/build` takes a literal string and all 343 files it touches are
+   statically reachable, so bundler file-tracing is not the problem; and a
+   `Module._load` probe that appears to show parse5 never loading is a false
+   negative — the parser is only reached on some code paths.
+
 5. **Cold starts are slow.** Nest builds the module graph, connects TypeORM,
    runs the role permission reconcile and generates the Swagger document on
    every one. Expect a few seconds on the first request after a quiet period.
