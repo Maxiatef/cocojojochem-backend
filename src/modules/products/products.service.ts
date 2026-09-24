@@ -476,29 +476,69 @@ export class ProductsService {
     return this.decorateAll(products);
   }
 
-  // Related products: same category first, then products sharing at least one
-  // function tag — useful for the "you may also need" panel on a product page.
+  /**
+   * "You may also need" on a product page: products sharing this one's
+   * category, brand or function tags, most-alike first.
+   *
+   * Each candidate is scored — category 3, brand 2, and 1 per shared function
+   * (capped at 3, so a product with many tags can't outrank a same-category
+   * one on tags alone). A product matching all three signals therefore lands
+   * at the top, and each result carries `relatedBy` so the page can say why it
+   * was suggested.
+   *
+   * Picked as ids first, then loaded through baseQuery(), for the same reason
+   * as findCartSuggestions below: filtering the joined `functions` collection
+   * directly (as this used to) also trims the functions returned on each card.
+   */
   async findRelated(slug: string, limit = 8) {
     await this.autoPublishDueSchedules();
-    const product = await this.productsRepo.findOne({
-      where: { slug },
-      relations: ['functions'],
-    });
+    const product = await this.productsRepo.findOne({ where: { slug }, relations: ['functions'] });
     if (!product) throw new NotFoundException(`Product "${slug}" not found`);
 
     const functionIds = product.functions.map((f) => f.id);
+    const take = Math.min(Math.max(Number(limit) || 8, 1), 24);
 
-    const qb = this.applyPublicVisibility(this.baseQuery())
-      .andWhere('product.id != :id', { id: product.id })
-      .andWhere(
-        functionIds.length
-          ? '(product.categoryId = :categoryId OR functions.id IN (:...functionIds))'
-          : 'product.categoryId = :categoryId',
-        { categoryId: product.categoryId, functionIds },
-      )
-      .take(limit);
+    const rows: { id: string; sameCategory: boolean; sameBrand: boolean; sharedFunctions: number }[] =
+      await this.productsRepo.query(
+        `SELECT p.id,
+                ($2::uuid IS NOT NULL AND p."categoryId" = $2::uuid)                     AS "sameCategory",
+                ($3::text IS NOT NULL AND lower(p.brand) = lower($3::text))              AS "sameBrand",
+                (SELECT count(*)::int FROM product_functions pf
+                  WHERE pf."productId" = p.id AND pf."functionId" = ANY($4::uuid[]))     AS "sharedFunctions"
+           FROM products p
+          WHERE p."isPublished" = true
+            AND (p."scheduledPublishAt" IS NULL OR p."scheduledPublishAt" <= NOW())
+            AND p."visibility" = 'PUBLIC'
+            AND p.id <> $1::uuid`,
+        [product.id, product.categoryId ?? null, product.brand?.trim() || null, functionIds],
+      );
 
-    return this.decorateAll(await qb.getMany());
+    const scored = rows
+      .map((r) => ({
+        ...r,
+        score: (r.sameCategory ? 3 : 0) + (r.sameBrand ? 2 : 0) + Math.min(r.sharedFunctions, 3),
+      }))
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, take);
+    if (!scored.length) return [];
+
+    const pickedIds = scored.map((r) => r.id);
+    const products = await this.applyPublicVisibility(this.baseQuery())
+      .andWhere('product.id IN (:...pickedIds)', { pickedIds })
+      .getMany();
+
+    const byId = new Map(scored.map((r, i) => [r.id, { ...r, rank: i }]));
+    products.sort((a, b) => byId.get(a.id)!.rank - byId.get(b.id)!.rank);
+
+    return this.decorateAll(products).map((p: any) => {
+      const r = byId.get(p.id)!;
+      const relatedBy: ('category' | 'brand' | 'function')[] = [];
+      if (r.sameCategory) relatedBy.push('category');
+      if (r.sameBrand) relatedBy.push('brand');
+      if (r.sharedFunctions > 0) relatedBy.push('function');
+      return { ...p, relatedBy };
+    });
   }
 
   /**
