@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionGuard } from '../auth/guards/permission.guard';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { WorkspaceService } from './workspace.service';
 import { MergeWorkspaceDto, SaveCompareDto, SaveProjectsDto } from './dto/workspace.dto';
 
@@ -13,6 +15,14 @@ import { MergeWorkspaceDto, SaveCompareDto, SaveProjectsDto } from './dto/worksp
 @UseGuards(JwtAuthGuard)
 export class WorkspaceController {
   constructor(private readonly workspaceService: WorkspaceService) {}
+
+  // Staff view of a customer's lists (user detail in the admin). Read-only.
+  @Get('user/:userId')
+  @RequirePermission('canViewUsers')
+  @UseGuards(PermissionGuard)
+  getForUser(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.workspaceService.get(userId);
+  }
 
   @Get()
   get(@Req() req: any) {

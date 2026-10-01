@@ -57,6 +57,12 @@ export class PublicSiteSettingsController {
 
   @Get()
   async getPublicSettings() {
-    return { timezone: await this.siteSettingsService.getTimezone() };
+    const [timezone, homeSpotlightProductId] = await Promise.all([
+      this.siteSettingsService.getTimezone(),
+      // Which product the home page hero features. A product id, which the
+      // storefront already shows publicly; empty means "pick automatically".
+      this.siteSettingsService.getValue('HOME_SPOTLIGHT_PRODUCT_ID'),
+    ]);
+    return { timezone, homeSpotlightProductId: homeSpotlightProductId || null };
   }
 }
