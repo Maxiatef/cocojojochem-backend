@@ -566,7 +566,7 @@ export class ProductsService {
    * curated. So the remainder is filled with published products (featured
    * first), still excluding the cart.
    */
-  async findCartSuggestions(variantIds: string[], limit = 3) {
+  async findCartSuggestions(variantIds: string[], limit = 3, excludeProductIds: string[] = []) {
     await this.autoPublishDueSchedules();
 
     // Malformed ids reach Postgres as a uuid[] cast and raise 22P02, which
@@ -585,25 +585,32 @@ export class ProductsService {
       );
     if (!seeds.length) return [];
 
-    const excludeIds = seeds.map((s) => s.id);
+    const seedIds = seeds.map((s) => s.id);
+    // Products already in the cart stay eligible when they have another size
+    // not yet in it — a customer buying the 1 kg may want the 5 kg too. Only
+    // products the caller has already shown are skipped outright.
+    const excludeIds = excludeProductIds.filter(isUuid);
     const categoryIds = [...new Set(seeds.map((s) => s.categoryId).filter(Boolean))] as string[];
     const brands = [...new Set(seeds.map((s) => s.brand).filter(Boolean))] as string[];
 
     const functionRows: { functionId: string }[] = await this.productsRepo.query(
       `SELECT DISTINCT "functionId" FROM product_functions WHERE "productId" = ANY($1::uuid[])`,
-      [excludeIds],
+      [seedIds],
     );
     const functionIds = functionRows.map((r) => r.functionId);
 
-    const VISIBLE = `p."isPublished" = true
+    // $excl = products to skip, $cart = variant ids already in the cart.
+    const visible = (excl: number, cart: number) => `p."isPublished" = true
        AND (p."scheduledPublishAt" IS NULL OR p."scheduledPublishAt" <= NOW())
        AND p."visibility" = 'PUBLIC'
-       AND p.id <> ALL($1::uuid[])`;
+       AND p.id <> ALL($${excl}::uuid[])
+       AND EXISTS (SELECT 1 FROM product_variants pv
+                    WHERE pv."productId" = p.id AND pv.id <> ALL($${cart}::uuid[]))`;
 
     const matched: { id: string }[] = await this.productsRepo.query(
       `SELECT p.id
          FROM products p
-        WHERE ${VISIBLE}
+        WHERE ${visible(1, 6)}
           AND (
             ($2::uuid[] <> '{}' AND p."categoryId" = ANY($2::uuid[]))
             OR ($3::text[] <> '{}' AND p.brand = ANY($3::text[]))
@@ -613,7 +620,7 @@ export class ProductsService {
           )
         ORDER BY random()
         LIMIT $5`,
-      [excludeIds, categoryIds, brands, functionIds, limit],
+      [excludeIds, categoryIds, brands, functionIds, limit, ids],
     );
 
     let pickedIds = matched.map((r) => r.id);
@@ -622,11 +629,11 @@ export class ProductsService {
       const fillers: { id: string }[] = await this.productsRepo.query(
         `SELECT p.id
            FROM products p
-          WHERE ${VISIBLE}
+          WHERE ${visible(1, 4)}
             AND p.id <> ALL($2::uuid[])
           ORDER BY p."isFeatured" DESC, random()
           LIMIT $3`,
-        [excludeIds, pickedIds, limit - pickedIds.length],
+        [excludeIds, pickedIds, limit - pickedIds.length, ids],
       );
       pickedIds = pickedIds.concat(fillers.map((r) => r.id));
     }

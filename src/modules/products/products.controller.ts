@@ -122,14 +122,24 @@ export class ProductsController {
   // turns a public endpoint into "select the whole catalogue with its six
   // joined collections".
   @Get('cart-suggestions')
-  findCartSuggestions(@Query('variantIds') variantIds?: string, @Query('limit') limit = '3') {
+  //
+  // `exclude` lists products the checkout has already shown, so it can keep
+  // asking for fresh ones after each add. Capped like the limit.
+  findCartSuggestions(
+    @Query('variantIds') variantIds?: string,
+    @Query('limit') limit = '3',
+    @Query('exclude') exclude?: string,
+  ) {
     const parsed = Number(limit);
-    return this.productsService.findCartSuggestions(
-      (variantIds || '')
+    const uuids = (raw?: string) =>
+      (raw || '')
         .split(',')
-        .map((raw) => raw.trim())
-        .filter((raw) => UUID_RE.test(raw)),
+        .map((v) => v.trim())
+        .filter((v) => UUID_RE.test(v));
+    return this.productsService.findCartSuggestions(
+      uuids(variantIds),
       Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 12) : 3,
+      uuids(exclude).slice(0, 200),
     );
   }
 
