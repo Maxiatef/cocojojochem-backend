@@ -41,6 +41,7 @@ import {
   PendingCheckout,
   AuditLog,
   WishlistItem,
+  CustomerWorkspace,
 } from './entities';
 
 export const AppDataSource = new DataSource({
@@ -90,6 +91,7 @@ export const AppDataSource = new DataSource({
   PendingCheckout,
   AuditLog,
   WishlistItem,
+  CustomerWorkspace,
   ],
   migrations: ['src/migrations/*.ts'],
   // The migration CLI is run by hand against the same database the deployment

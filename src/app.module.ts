@@ -42,9 +42,11 @@ import {
   PendingCheckout,
   AuditLog,
   WishlistItem,
+  CustomerWorkspace,
 } from './entities';
 
 import { RolesModule } from './modules/roles/roles.module';
+import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { FunctionsModule } from './modules/functions/functions.module';
@@ -177,6 +179,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
   PendingCheckout,
   AuditLog,
   WishlistItem,
+  CustomerWorkspace,
       ],
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       // Applying migrations on boot is right for a single long-lived process
@@ -195,6 +198,7 @@ import { AuditInterceptor } from './common/audit/audit.interceptor';
       connectTimeoutMS: 10000,
     }),
     RolesModule,
+    WorkspaceModule,
     TeamsModule,
     CategoriesModule,
     FunctionsModule,

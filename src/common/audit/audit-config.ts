@@ -33,6 +33,7 @@ export const SKIP_ENTITIES = new Set<string>([
   'Cart',
   'CartItem',
   'QuoteListItem',
+  'CustomerWorkspace',
   'PendingCheckout',
   'SeoMetric',
   'SeoIssue',
