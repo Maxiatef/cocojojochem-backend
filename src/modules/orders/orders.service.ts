@@ -6,6 +6,7 @@ import { EntityManager, In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import axios from 'axios';
 import {
+  QuoteRequest,
   Cart,
   Order,
   OrderItem,
@@ -599,6 +600,27 @@ export class OrdersService {
     return order;
   }
 
+  // Combined checkout: the request must be the buyer's own, submitted with
+  // `withPayment`, and not already attached to another order. Anything else
+  // is refused rather than silently ignored — a wrong id would otherwise link
+  // someone else's request to this payment.
+  private async assertLinkableQuoteRequest(
+    quoteRequestId: string | undefined,
+    owner: { userId: string | null; email: string | null },
+  ): Promise<string | null> {
+    if (!quoteRequestId) return null;
+    const qr = await this.ordersRepo.manager.findOne(QuoteRequest, { where: { id: quoteRequestId } });
+    const sameOwner =
+      !!qr &&
+      (owner.userId
+        ? qr.userId === owner.userId
+        : !qr.userId && qr.email.trim().toLowerCase() === (owner.email || '').trim().toLowerCase());
+    if (!qr || !sameOwner || !qr.paymentRequested || qr.orderId) {
+      throw new BadRequestException('That order request could not be attached to this payment. Please try again.');
+    }
+    return qr.id;
+  }
+
   // No Order row is created here — only once Stripe confirms payment (see
   // finalizeCheckoutFromPendingId, called from WebhooksService). This method
   // validates everything, snapshots the cart into a PendingCheckout row, and
@@ -658,9 +680,15 @@ export class OrdersService {
       const shippingCost = dto.shippingCost ?? 0;
       const taxAmount = await this.computeTax(subtotal);
 
+      const quoteRequestId = await this.assertLinkableQuoteRequest(dto.quoteRequestId, {
+        userId,
+        email: null,
+      });
+
       const pending = await this.pendingCheckoutsRepo.save(
         this.pendingCheckoutsRepo.create({
           userId,
+          quoteRequestId,
           itemsJson: JSON.stringify(itemSnapshots),
           subtotal: subtotal.toFixed(2),
           shippingCost: shippingCost.toFixed(2),
@@ -787,9 +815,17 @@ export class OrdersService {
       }
     }
 
+    // A guest's request was submitted before any account existed, so it is
+    // matched by email (createAccount links the order, not the request).
+    const quoteRequestId = await this.assertLinkableQuoteRequest(dto.quoteRequestId, {
+      userId: null,
+      email: dto.guestEmail,
+    });
+
     const pending = await this.pendingCheckoutsRepo.save(
       this.pendingCheckoutsRepo.create({
         userId: linkedUserId,
+        quoteRequestId,
         guestEmail: dto.guestEmail,
         guestName: dto.guestName,
         guestPhone: dto.guestPhone ?? null,
@@ -895,6 +931,16 @@ export class OrdersService {
         ? (await this.usersService.findById(pending.userId)).email
         : pending.guestEmail || '';
       await this.couponsService.incrementUsage(pending.couponId, email, order.id);
+    }
+
+    // Combined checkout: attach the order to the pricing request sent with it.
+    // Only if still unlinked, so a replayed webhook can never move it.
+    if (pending.quoteRequestId) {
+      await this.ordersRepo.manager.update(
+        QuoteRequest,
+        { id: pending.quoteRequestId, orderId: IsNull() },
+        { orderId: order.id },
+      );
     }
 
     await this.pendingCheckoutsRepo.remove(pending);

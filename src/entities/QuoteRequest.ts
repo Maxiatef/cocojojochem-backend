@@ -61,6 +61,20 @@ export class QuoteRequest {
   @Column({ type: 'text', nullable: true })
   message: string | null;
 
+  // Shipping city, state and country from the order-request form.
+  @Column({ type: 'varchar', length: 600, nullable: true })
+  destination: string | null;
+
+  // Set when the customer paid for priced items in the same checkout. The
+  // request is created first; orderId is filled in by the Stripe webhook once
+  // payment is confirmed. paymentRequested without orderId = payment not
+  // completed (the request itself still stands).
+  @Column({ type: 'boolean', default: false })
+  paymentRequested: boolean;
+
+  @Column({ type: 'uuid', nullable: true })
+  orderId: string | null;
+
   @Column({ type: 'enum', enum: RequestType, default: RequestType.QUOTE })
   type: RequestType;
 

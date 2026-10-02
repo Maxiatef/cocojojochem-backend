@@ -50,6 +50,11 @@ export class PendingCheckout {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
+  // The order request submitted alongside this payment (combined checkout);
+  // linked to the Order when Stripe confirms payment.
+  @Column({ type: 'uuid', nullable: true })
+  quoteRequestId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

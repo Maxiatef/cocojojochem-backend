@@ -58,7 +58,7 @@ export class EmailService {
       return;
     }
 
-    const subject = `New Quote Request #${quoteRequest.id} — ${quoteRequest.fullName}`;
+    const subject = `New ${quoteRequest.paymentRequested ? 'order request (with payment)' : 'order request'} ${requestReference(quoteRequest.id)} — ${quoteRequest.fullName}`;
     const html = this.buildQuoteRequestEmail(quoteRequest);
 
     try {
@@ -167,7 +167,7 @@ export class EmailService {
   // toggle and the recipient address are admin-settable (Admin Settings →
   // Emails) — no hardcoded fallback email; if the admin hasn't set one yet,
   // this honestly skips rather than guessing a destination.
-  async sendNewOrderInternalNotification(order: Order): Promise<void> {
+  async sendNewOrderInternalNotification(order: Order, linkedRequestRef?: string | null): Promise<void> {
     const enabledSetting = await this.siteSettingsService.getValue('newOrderNotificationEnabled');
     if (enabledSetting === 'false') {
       this.logger.log(`New-order internal notifications are disabled — skipping for order #${order.id}.`);
@@ -191,7 +191,7 @@ export class EmailService {
     }
 
     const subject = `COCOJOJOCHEM - New Order #${order.id}`;
-    const html = this.buildNewOrderNotificationEmail(order);
+    const html = this.buildNewOrderNotificationEmail(order, linkedRequestRef);
 
     try {
       await this.sendEmail(apiKey, notifyEmail, subject, html, 'CocoJojoChem Orders');
@@ -715,7 +715,7 @@ export class EmailService {
 </html>`;
   }
 
-  private buildNewOrderNotificationEmail(order: Order): string {
+  private buildNewOrderNotificationEmail(order: Order, linkedRequestRef?: string | null): string {
     const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
     const customerName = order.user?.fullName || order.guestName || 'Guest';
     const customerEmail = order.user?.email || order.guestEmail || '—';
@@ -816,6 +816,13 @@ export class EmailService {
           order.shippingAddress
             ? `<p class="section-title">Shipping Address</p>
         <div class="box" style="white-space: pre-line;">${escapeHtml(order.shippingAddress)}</div>`
+            : ''
+        }
+
+        ${
+          linkedRequestRef
+            ? `<p class="section-title">Pricing also requested</p>
+        <div class="box">The customer also asked us to price other items in this checkout: request <strong>${escapeHtml(linkedRequestRef)}</strong> (Admin → Order Requests).</div>`
             : ''
         }
 
@@ -1001,29 +1008,46 @@ export class EmailService {
   }
 
   private buildQuoteRequestEmail(qr: QuoteRequest): string {
+    const cell = 'padding:6px 10px;border-bottom:1px solid #eee;';
     const itemRows = (qr.items || [])
-      .map(
-        (item) =>
-          `<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;">${escapeHtml(item.productName)}</td>` +
-          `<td style="padding:6px 10px;border-bottom:1px solid #eee;">${item.quantity ?? '—'}${item.unit ? ` ${escapeHtml(item.unit)}` : ''}</td>` +
-          `<td style="padding:6px 10px;border-bottom:1px solid #eee;">${item.notes ? escapeHtml(item.notes) : '—'}</td></tr>`,
-      )
+      .map((item) => {
+        const isReference = item.source === 'SUPPLIER_REFERENCE';
+        const name = isReference
+          ? `${escapeHtml(item.productName)}<br><span style="display:inline-block;margin-top:2px;padding:1px 6px;border-radius:8px;background:#fff4e0;color:#8a5a00;font-size:11px;">Supplier reference${item.referenceCode ? ` · ${escapeHtml(item.referenceCode)}` : ''}</span>` +
+            (item.sourceUrl ? ` <a href="${escapeHtml(item.sourceUrl)}" style="font-size:11px;">original listing</a>` : '')
+          : escapeHtml(item.productName);
+        return (
+          `<tr><td style="${cell}">${name}</td>` +
+          `<td style="${cell}">${item.quantity ?? '—'}${item.unit ? ` · ${escapeHtml(item.unit)}` : ''}</td>` +
+          `<td style="${cell}">${item.notes ? escapeHtml(item.notes) : '—'}</td></tr>`
+        );
+      })
       .join('');
+    const referenceCount = (qr.items || []).filter((i) => i.source === 'SUPPLIER_REFERENCE').length;
+    const account = qr.userId ? 'Customer (signed in)' : 'Guest';
+    const payment = qr.orderId
+      ? `Paid — order #${escapeHtml(qr.orderId)}`
+      : qr.paymentRequested
+        ? 'Paying for priced items at checkout — the order is linked here once Stripe confirms payment.'
+        : 'None — request only, no payment taken.';
 
     return `
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>New Quote Request</title></head>
+<head><meta charset="utf-8"><title>New Order Request</title></head>
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
   <div style="max-width:600px;margin:0 auto;padding:20px;">
     ${this.brandHeader('Internal')}
-    <h2 style="margin-bottom:4px;">New quote request — #${qr.id}</h2>
-    <p style="color:#666;margin-top:0;">Type: ${escapeHtml(qr.type)}</p>
+    <h2 style="margin-bottom:4px;">New order request — ${requestReference(qr.id)}</h2>
+    <p style="color:#666;margin-top:0;">Type: ${escapeHtml(qr.type)}${referenceCount ? ` · ${referenceCount} supplier-reference item${referenceCount === 1 ? '' : 's'} to source` : ''}</p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Name</td><td style="padding:4px 0;">${escapeHtml(qr.fullName)}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Email</td><td style="padding:4px 0;">${escapeHtml(qr.email)}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Phone</td><td style="padding:4px 0;">${qr.phone ? escapeHtml(qr.phone) : '—'}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Company</td><td style="padding:4px 0;">${qr.companyName ? escapeHtml(qr.companyName) : '—'}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Account</td><td style="padding:4px 0;">${account}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Ship to</td><td style="padding:4px 0;">${qr.destination ? escapeHtml(qr.destination) : '—'}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Linked order</td><td style="padding:4px 0;">${payment}</td></tr>
     </table>
     ${
       qr.items && qr.items.length > 0
@@ -1189,4 +1213,9 @@ function stripHtmlTags(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** The customer-facing request reference, e.g. CJ-1A2B3C4D. */
+export function requestReference(id: string): string {
+  return `CJ-${id.slice(0, 8).toUpperCase()}`;
 }

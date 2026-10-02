@@ -52,6 +52,13 @@ export class CheckoutDto {
   @IsString()
   couponCode?: string;
 
+  // Combined checkout: the order request (POST /wholesale/quote-requests)
+  // created just before this call for the cart's "Price to confirm" items.
+  // Linked to the order once Stripe confirms payment.
+  @IsOptional()
+  @IsUUID('4')
+  quoteRequestId?: string;
+
   // Last shipping cost returned by POST /orders/shipping-estimate for this
   // cart/address — passed through so the actual Stripe charge matches what
   // the checkout UI showed. Server never recomputes it here (no address

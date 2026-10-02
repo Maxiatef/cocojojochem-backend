@@ -8,11 +8,14 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { IsEnum } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { QuoteRequestsService } from './quote-requests.service';
@@ -28,18 +31,32 @@ class UpdateStatusDto {
 export class QuoteRequestsController {
   constructor(private readonly quoteRequestsService: QuoteRequestsService) {}
 
-  // Public — this is the "Request a Quote" / "Request a Sample" form on the site
+  // Public — the storefront's order request (the "Price to confirm" part of
+  // the cart) and the sample form. Guests and signed-in customers both use
+  // it; a valid customer token links the request to their account so it
+  // shows in their request history and the admin can tell the two apart.
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
   @Post()
-  create(@Body() dto: CreateQuoteRequestDto) {
-    return this.quoteRequestsService.create(dto);
+  @UseGuards(OptionalJwtAuthGuard)
+  create(@Req() req: any, @Body() dto: CreateQuoteRequestDto) {
+    return this.quoteRequestsService.create(dto, req.user ?? null);
+  }
+
+  // The signed-in customer's own requests, newest first (account page).
+  // Declared before ':id', which would otherwise swallow "mine".
+  @Get('mine')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard)
+  findMine(@Req() req: any) {
+    return this.quoteRequestsService.findMine(req.user.id);
   }
 
   @Get()
   @RequirePermission('canViewQuoteRequests')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
-  findAll(@Query('status') status?: RequestStatus) {
-    return this.quoteRequestsService.findAll(status);
+  findAll(@Query('status') status?: RequestStatus, @Query('orderId') orderId?: string) {
+    return this.quoteRequestsService.findAll(status, orderId);
   }
 
   @Get('stats')

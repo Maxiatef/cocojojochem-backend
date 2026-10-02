@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { isUUID as isUuid } from 'class-validator';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuoteRequest, QuoteRequestItem, RequestStatus, RequestType } from '../../entities';
@@ -17,9 +19,21 @@ export class QuoteRequestsService {
     private readonly emailService: EmailService,
   ) {}
 
-  findAll(status?: RequestStatus) {
+  findAll(status?: RequestStatus, orderId?: string) {
+    const where: Record<string, unknown> = {};
+    if (status) where.status = status;
+    // Order detail asks "was pricing also requested with this order?"
+    if (orderId && isUuid(orderId)) where.orderId = orderId;
     return this.quoteRequestsRepo.find({
-      where: status ? { status } : {},
+      where,
+      relations: ['items'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  findMine(userId: string) {
+    return this.quoteRequestsRepo.find({
+      where: { userId },
       relations: ['items'],
       order: { createdAt: 'DESC' },
     });
@@ -31,15 +45,38 @@ export class QuoteRequestsService {
     return qr;
   }
 
-  async create(dto: CreateQuoteRequestDto) {
+  async create(dto: CreateQuoteRequestDto, user: { id: string; role?: string } | null = null) {
+    // Spam trap filled in: answer as if it worked, store and send nothing.
+    if (dto.website) {
+      this.logger.warn(`Quote request spam trap tripped (${dto.email}) — discarded.`);
+      return { id: randomUUID(), status: RequestStatus.NEW, createdAt: new Date() };
+    }
+
     const quoteRequest = this.quoteRequestsRepo.create({
+      // Only customer accounts are linked; a staff member trying the form
+      // while signed in is not a customer's request.
+      userId: user && (!user.role || user.role === 'CUSTOMER') ? user.id : null,
       fullName: dto.fullName,
       email: dto.email,
       phone: dto.phone,
       companyName: dto.companyName,
       message: dto.message,
+      destination: dto.destination ?? null,
+      paymentRequested: !!dto.withPayment,
       type: dto.type || RequestType.QUOTE,
-      items: dto.items?.map((i) => this.itemsRepo.create(i)),
+      items: dto.items?.map((i) => {
+        const isReference = i.source === 'SUPPLIER_REFERENCE';
+        return this.itemsRepo.create({
+          productId: isReference ? null : i.productId ?? null,
+          productName: i.productName,
+          quantity: i.quantity ?? null,
+          unit: i.unit ?? null,
+          notes: i.notes ?? null,
+          source: isReference ? 'SUPPLIER_REFERENCE' : 'COCOJOJO',
+          referenceCode: isReference ? i.referenceCode ?? null : null,
+          sourceUrl: isReference ? i.sourceUrl ?? null : null,
+        });
+      }),
     });
     const saved = await this.quoteRequestsRepo.save(quoteRequest);
     this.logger.log(

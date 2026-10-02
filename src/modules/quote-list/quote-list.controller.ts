@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Req, 
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { QuoteListService } from './quote-list.service';
-import { AddQuoteListItemDto } from './dto/add-quote-list-item.dto';
+import { AddQuoteListItemDto, MergeQuoteListDto } from './dto/add-quote-list-item.dto';
 import { UpdateQuoteListItemDto } from './dto/update-quote-list-item.dto';
 
 @ApiTags('Quote List')
@@ -23,8 +23,8 @@ export class QuoteListController {
   }
 
   @Post('merge')
-  mergeGuestList(@Req() req: any, @Body('items') items: AddQuoteListItemDto[]) {
-    return this.quoteListService.mergeGuestList(req.user.id, items);
+  mergeGuestList(@Req() req: any, @Body() dto: MergeQuoteListDto) {
+    return this.quoteListService.mergeGuestList(req.user.id, dto.items);
   }
 
   @Post('items')

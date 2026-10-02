@@ -3,12 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Stripe from 'stripe';
 import axios from 'axios';
-import { Order, OrderStatus } from '../../entities';
+import { Order, OrderStatus, QuoteRequest } from '../../entities';
 import { applyTrackingNumber } from '../orders/orders.service';
 import { computeAdvancedOrderStatus } from '../orders/orders.service';
 import { OrdersService } from '../orders/orders.service';
 import { StripeService } from '../stripe/stripe.service';
-import { EmailService } from '../email/email.service';
+import { EmailService, requestReference } from '../email/email.service';
 
 /**
  * Listeners for Stripe / ShipStation / Shippo webhook events.
@@ -43,6 +43,13 @@ export class WebhooksService {
     private readonly stripeService: StripeService,
     private readonly emailService: EmailService,
   ) {}
+
+  // "Pricing also requested: CJ-…" for the staff new-order email, when the
+  // order came from a combined checkout.
+  private async linkedRequestRef(orderId: string): Promise<string | null> {
+    const qr = await this.ordersRepo.manager.findOne(QuoteRequest, { where: { orderId } });
+    return qr ? requestReference(qr.id) : null;
+  }
 
   async handleStripeEvent(rawBody: Buffer, signature: string) {
     let event: Stripe.Event;
@@ -143,7 +150,7 @@ export class WebhooksService {
           );
         }
         try {
-          await this.emailService.sendNewOrderInternalNotification(order);
+          await this.emailService.sendNewOrderInternalNotification(order, await this.linkedRequestRef(order.id));
         } catch (err) {
           this.logger.warn(
             `New-order internal notification threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,
@@ -196,7 +203,7 @@ export class WebhooksService {
             );
           }
           try {
-            await this.emailService.sendNewOrderInternalNotification(order);
+            await this.emailService.sendNewOrderInternalNotification(order, await this.linkedRequestRef(order.id));
           } catch (err) {
             this.logger.warn(
               `New-order internal notification threw unexpectedly for order #${order.id}: ${err instanceof Error ? err.message : err}`,

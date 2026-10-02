@@ -27,4 +27,17 @@ export class QuoteRequestItem {
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;
+
+  // COCOJOJO = a product in our catalog (productId set). SUPPLIER_REFERENCE =
+  // a material from the supplier reference library on the storefront, which
+  // is not in our catalog: productId is null and referenceCode identifies it.
+  @Column({ type: 'varchar', length: 32, default: 'COCOJOJO' })
+  source: 'COCOJOJO' | 'SUPPLIER_REFERENCE';
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  referenceCode: string | null;
+
+  // The supplier's original listing, for reference lines.
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  sourceUrl: string | null;
 }

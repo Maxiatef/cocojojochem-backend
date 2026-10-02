@@ -21,17 +21,41 @@ export class QuoteListService {
     return { count, items };
   }
 
-  addItem(userId: string, dto: AddQuoteListItemDto) {
-    const item = this.repo.create({
+  // A catalog line is identified by its product, a supplier-reference line by
+  // its reference code; either way, plus the requested size.
+  private sameLine(item: QuoteListItem, dto: AddQuoteListItemDto) {
+    const isReference = dto.source === 'SUPPLIER_REFERENCE';
+    const target = isReference
+      ? item.source === 'SUPPLIER_REFERENCE' && item.referenceCode === dto.referenceCode
+      : item.source !== 'SUPPLIER_REFERENCE' && item.productId === dto.productId;
+    return target && item.variantLabel === (dto.variantLabel ?? null);
+  }
+
+  private build(userId: string, dto: AddQuoteListItemDto) {
+    const isReference = dto.source === 'SUPPLIER_REFERENCE';
+    return this.repo.create({
       userId,
-      productId: dto.productId,
+      source: isReference ? 'SUPPLIER_REFERENCE' : 'COCOJOJO',
+      productId: isReference ? null : dto.productId ?? null,
+      referenceCode: isReference ? dto.referenceCode ?? null : null,
+      sourceUrl: isReference ? dto.sourceUrl ?? null : null,
       productSlug: dto.productSlug,
       productName: dto.productName,
       variantLabel: dto.variantLabel ?? null,
       imageUrl: dto.imageUrl ?? null,
       quantity: dto.quantity,
     });
-    return this.repo.save(item);
+  }
+
+  // Adding something already on the list raises its quantity rather than
+  // creating a second line for the same thing.
+  async addItem(userId: string, dto: AddQuoteListItemDto) {
+    const existing = (await this.getItems(userId)).find((i) => this.sameLine(i, dto));
+    if (existing) {
+      existing.quantity += dto.quantity;
+      return this.repo.save(existing);
+    }
+    return this.repo.save(this.build(userId, dto));
   }
 
   async updateItemQuantity(userId: string, itemId: string, quantity: number) {
@@ -66,18 +90,8 @@ export class QuoteListService {
   // matching items (same productId + variantLabel) get their quantities
   // combined instead of duplicated.
   async mergeGuestList(userId: string, guestItems: AddQuoteListItemDto[]) {
-    const existingItems = await this.getItems(userId);
     for (const guestItem of guestItems) {
-      const existing = existingItems.find(
-        (i) => i.productId === guestItem.productId && i.variantLabel === (guestItem.variantLabel ?? null),
-      );
-      if (existing) {
-        existing.quantity += guestItem.quantity;
-        await this.repo.save(existing);
-      } else {
-        const saved = await this.addItem(userId, guestItem);
-        existingItems.push(saved);
-      }
+      await this.addItem(userId, guestItem);
     }
     return this.getItems(userId);
   }
