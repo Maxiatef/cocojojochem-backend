@@ -40,4 +40,28 @@ export class QuoteRequestItem {
   // The supplier's original listing, for reference lines.
   @Column({ type: 'varchar', length: 500, nullable: true })
   sourceUrl: string | null;
+
+  // ---- Staff's quote for this line ----
+
+  // Unit price in USD for quotedPackSize; null = not priced yet.
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  quotedPrice: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  quotedPackSize: string | null;
+
+  // Defaults to the requested quantity when staff leave it blank.
+  @Column({ type: 'int', nullable: true })
+  quotedQuantity: number | null;
+
+  // e.g. "In stock", "2–3 weeks".
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  availability: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  quoteNote: string | null;
+
+  // False = we can't supply this line; it is shown but never charged.
+  @Column({ type: 'boolean', default: true })
+  isAvailable: boolean;
 }

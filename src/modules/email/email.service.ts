@@ -58,7 +58,8 @@ export class EmailService {
       return;
     }
 
-    const subject = `New ${quoteRequest.paymentRequested ? 'order request (with payment)' : 'order request'} ${requestReference(quoteRequest.id)} — ${quoteRequest.fullName}`;
+    const kind = quoteRequest.kind === 'ORDER' ? 'order request' : 'quote request';
+    const subject = `New ${kind}${quoteRequest.paymentRequested ? ' (with payment)' : ''} ${requestReference(quoteRequest.id)} — ${quoteRequest.fullName}`;
     const html = this.buildQuoteRequestEmail(quoteRequest);
 
     try {
@@ -1038,13 +1039,14 @@ export class EmailService {
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
   <div style="max-width:600px;margin:0 auto;padding:20px;">
     ${this.brandHeader('Internal')}
-    <h2 style="margin-bottom:4px;">New order request — ${requestReference(qr.id)}</h2>
+    <h2 style="margin-bottom:4px;">New ${qr.kind === 'ORDER' ? 'order' : 'quote'} request — ${requestReference(qr.id)}</h2>
     <p style="color:#666;margin-top:0;">Type: ${escapeHtml(qr.type)}${referenceCount ? ` · ${referenceCount} supplier-reference item${referenceCount === 1 ? '' : 's'} to source` : ''}</p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Name</td><td style="padding:4px 0;">${escapeHtml(qr.fullName)}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Email</td><td style="padding:4px 0;">${escapeHtml(qr.email)}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Phone</td><td style="padding:4px 0;">${qr.phone ? escapeHtml(qr.phone) : '—'}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Company</td><td style="padding:4px 0;">${qr.companyName ? escapeHtml(qr.companyName) : '—'}</td></tr>
+      <tr><td style="padding:4px 10px 4px 0;color:#666;">Kind</td><td style="padding:4px 0;">${qr.kind === 'ORDER' ? 'Order request (has delivery address)' : 'Quote request (pricing only)'}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Account</td><td style="padding:4px 0;">${account}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Ship to</td><td style="padding:4px 0;">${qr.destination ? escapeHtml(qr.destination) : '—'}</td></tr>
       <tr><td style="padding:4px 10px 4px 0;color:#666;">Linked order</td><td style="padding:4px 0;">${payment}</td></tr>
@@ -1068,7 +1070,7 @@ export class EmailService {
         : ''
     }
     <p style="margin-top:24px;">
-      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/quote-requests"
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/quote-requests?open=${qr.id}"
          style="display:inline-block;padding:10px 20px;background:#3a9640;color:#fff;text-decoration:none;border-radius:4px;">
         View in admin dashboard
       </a>
@@ -1115,6 +1117,236 @@ export class EmailService {
    * character that would break RFC 5322 display-name parsing (the name is
    * admin-editable free text in Admin Settings → Emails).
    */
+  // ---------------------------------------------------------------------------
+  // Order / quote request lifecycle emails
+  //
+  //   customer                         staff (quoteNotificationEmail)
+  //   1. request received              new request (sendQuoteRequestNotification)
+  //   2. being reviewed                —
+  //   3. quote ready  (link)           —
+  //   —                                4. quote accepted (added to cart)
+  //   order confirmation (existing)    5. quote paid (order #)
+  //   6. request closed (+ reason)     6. customer declined
+  //
+  // All best-effort: they log and return, never throw into the request flow.
+  // ---------------------------------------------------------------------------
+
+  private siteUrl(): string {
+    return (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+  }
+
+  private async sendToCustomer(qr: QuoteRequest, subject: string, html: string, what: string) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      this.logger.warn(`RESEND_API_KEY not configured — skipping "${what}" email for ${requestReference(qr.id)}.`);
+      return;
+    }
+    try {
+      await this.sendEmail(apiKey, qr.email, subject, html, 'CocoJojoChem Requests');
+      this.logger.log(`"${what}" email sent for ${requestReference(qr.id)} to ${qr.email}.`);
+    } catch (err) {
+      this.logger.warn(`Failed to send "${what}" email for ${requestReference(qr.id)}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  private async sendToRequestStaff(subject: string, html: string, what: string) {
+    if ((await this.siteSettingsService.getValue('quoteNotificationEnabled')) === 'false') return;
+    const to = await this.siteSettingsService.getValue('quoteNotificationEmail');
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!to || !apiKey) {
+      this.logger.warn(`Request staff email "${what}" skipped — no recipient or RESEND_API_KEY.`);
+      return;
+    }
+    try {
+      await this.sendEmail(apiKey, to, subject, html, 'CocoJojoChem Requests');
+    } catch (err) {
+      this.logger.warn(`Failed to send staff email "${what}": ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /** Shared layout for the request emails. */
+  private requestShell(heading: string, body: string, suffix = 'Requests'): string {
+    return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(heading)}</title></head>
+<body style="margin:0;background:#f5f7f6;font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#1d2d33;">
+  <div style="max-width:620px;margin:0 auto;padding:28px 20px;">
+    <div style="background:#ffffff;border-radius:10px;padding:28px 26px;">
+      ${this.brandHeader(suffix)}
+      <h1 style="font-size:22px;line-height:1.3;margin:0 0 14px;">${escapeHtml(heading)}</h1>
+      ${body}
+    </div>
+    <p style="font-size:12px;color:#7a8a90;text-align:center;margin:16px 0 0;">CocoJojoChem · Wholesale cosmetic ingredients</p>
+  </div>
+</body></html>`;
+  }
+
+  private requestButton(href: string, label: string): string {
+    return `<p style="margin:22px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 22px;background:#1f5d4c;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">${escapeHtml(label)}</a></p>`;
+  }
+
+  private sourceBadge(item: QuoteRequest['items'][number]): string {
+    return item.source === 'SUPPLIER_REFERENCE'
+      ? ' <span style="display:inline-block;padding:1px 7px;border-radius:9px;background:#fff4e0;color:#8a5a00;font-size:11px;">Sourced on request</span>'
+      : '';
+  }
+
+  /** What the customer asked for (no prices). */
+  private requestedItemsTable(qr: QuoteRequest): string {
+    const cell = 'padding:8px 10px;border-bottom:1px solid #e6ecea;font-size:14px;vertical-align:top;';
+    const rows = (qr.items || [])
+      .map(
+        (i) =>
+          `<tr><td style="${cell}">${escapeHtml(i.productName)}${this.sourceBadge(i)}</td>` +
+          `<td style="${cell}white-space:nowrap;">${i.quantity ?? 1} × ${i.unit ? escapeHtml(i.unit) : 'size to confirm'}</td></tr>`,
+      )
+      .join('');
+    return `<table style="width:100%;border-collapse:collapse;margin:8px 0 18px;">
+      <thead><tr style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7a70;">
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;">Item</th>
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;">Quantity · size</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  /** The priced quote, line by line, with totals. */
+  quoteTotals(qr: QuoteRequest) {
+    const lines = (qr.items || []).filter((i) => i.isAvailable && i.quotedPrice != null);
+    const subtotal = lines.reduce((sum, i) => sum + Number(i.quotedPrice) * (i.quotedQuantity ?? i.quantity ?? 1), 0);
+    const shipping = qr.quotedShippingCost != null ? Number(qr.quotedShippingCost) : null;
+    return { lines, subtotal, shipping };
+  }
+
+  private quoteTable(qr: QuoteRequest): string {
+    const money = (n: number) => `$${n.toFixed(2)}`;
+    const cell = 'padding:8px 10px;border-bottom:1px solid #e6ecea;font-size:14px;vertical-align:top;';
+    const rows = (qr.items || [])
+      .map((i) => {
+        const qty = i.quotedQuantity ?? i.quantity ?? 1;
+        const detail = [i.quotedPackSize || i.unit, i.availability].filter(Boolean).map((t) => escapeHtml(String(t))).join(' · ');
+        const note = i.quoteNote ? `<br><span style="font-size:12px;color:#5b6b70;">${escapeHtml(i.quoteNote)}</span>` : '';
+        if (!i.isAvailable || i.quotedPrice == null) {
+          return `<tr style="color:#8a969a;"><td style="${cell}">${escapeHtml(i.productName)}${this.sourceBadge(i)}${note}</td>` +
+            `<td style="${cell}">${qty}</td><td style="${cell}" colspan="2">${i.isAvailable ? 'Not priced' : 'Not available'}</td></tr>`;
+        }
+        const unit = Number(i.quotedPrice);
+        return `<tr><td style="${cell}">${escapeHtml(i.productName)}${this.sourceBadge(i)}${detail ? `<br><span style="font-size:12px;color:#5b6b70;">${detail}</span>` : ''}${note}</td>` +
+          `<td style="${cell}">${qty}</td><td style="${cell}text-align:right;">${money(unit)}</td>` +
+          `<td style="${cell}text-align:right;font-weight:bold;">${money(unit * qty)}</td></tr>`;
+      })
+      .join('');
+    const { subtotal, shipping } = this.quoteTotals(qr);
+    const row = (label: string, value: string, strong = false) =>
+      `<tr><td colspan="3" style="padding:5px 10px;text-align:right;${strong ? 'font-weight:bold;' : 'color:#5b6b70;'}">${label}</td><td style="padding:5px 10px;text-align:right;${strong ? 'font-weight:bold;' : ''}">${value}</td></tr>`;
+    return `<table style="width:100%;border-collapse:collapse;margin:8px 0 18px;">
+      <thead><tr style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7a70;">
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;">Item</th>
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;">Qty</th>
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;text-align:right;">Unit price</th>
+        <th style="padding:6px 10px;border-bottom:2px solid #d8e0dd;text-align:right;">Total</th>
+      </tr></thead>
+      <tbody>${rows}
+        ${row('Items', money(subtotal))}
+        ${row('Shipping', shipping != null ? money(shipping) : 'Calculated at checkout')}
+        ${row('Quote total', money(subtotal + (shipping ?? 0)) + (shipping == null ? ' + shipping' : ''), true)}
+      </tbody></table>
+      <p style="font-size:12px;color:#5b6b70;margin:0 0 12px;">Prices in USD. Sales tax, where it applies, is added at checkout.</p>`;
+  }
+
+  private greeting(qr: QuoteRequest) {
+    const first = qr.fullName?.trim().split(/\s+/)[0];
+    return `<p style="margin:0 0 12px;">Hi ${first ? escapeHtml(first) : 'there'},</p>`;
+  }
+
+  /** 1 — to the customer, right after they submit. */
+  async sendRequestReceivedToCustomer(qr: QuoteRequest): Promise<void> {
+    const ref = requestReference(qr.id);
+    const isOrder = qr.kind === 'ORDER';
+    const intro = isOrder
+      ? `Thank you — we've received your order request <strong>${ref}</strong>. We'll confirm prices, availability and delivery${qr.destination ? ` to <strong>${escapeHtml(qr.destination)}</strong>` : ''}.`
+      : `Thank you — we've received your quote request <strong>${ref}</strong>. We'll reply with prices and availability.`;
+    const payment = qr.paymentRequested
+      ? `<p style="margin:0 0 12px;">The priced items you paid for at checkout are a separate order — you'll receive its confirmation once payment completes. Nothing has been charged for the items below.</p>`
+      : `<p style="margin:0 0 12px;">Nothing has been charged.</p>`;
+    const body =
+      this.greeting(qr) +
+      `<p style="margin:0 0 12px;">${intro}</p>` +
+      this.requestedItemsTable(qr) +
+      payment +
+      `<h2 style="font-size:15px;margin:20px 0 8px;">What happens next</h2>
+       <ol style="margin:0 0 12px;padding-left:20px;font-size:14px;">
+         <li>Our team reviews your request — usually within one business day.</li>
+         <li>We email you a quote with a price, pack size and availability for each item.</li>
+         <li>Accept the quote and the items go into your cart at the quoted prices — then check out as usual.</li>
+       </ol>` +
+      (qr.userId
+        ? this.requestButton(`${this.siteUrl()}/account#requests`, 'Follow your request')
+        : `<p style="margin:0 0 12px;font-size:14px;">Keep this reference: <strong>${ref}</strong>. Just reply to this email with any questions.</p>`);
+    await this.sendToCustomer(qr, `We received your ${isOrder ? 'order' : 'quote'} request ${ref}`, this.requestShell(isOrder ? 'Your order request is in.' : 'Your quote request is in.', body), 'request received');
+  }
+
+  /** 2 — to the customer, when staff start working on it. */
+  async sendRequestReviewingToCustomer(qr: QuoteRequest): Promise<void> {
+    const ref = requestReference(qr.id);
+    const body =
+      this.greeting(qr) +
+      `<p style="margin:0 0 12px;">We're now checking prices, grades and availability for your request <strong>${ref}</strong>. You'll receive your quote by email as soon as it's ready.</p>` +
+      this.requestedItemsTable(qr);
+    await this.sendToCustomer(qr, `We're reviewing your request ${ref}`, this.requestShell('We’re on it.', body), 'request reviewing');
+  }
+
+  /** 3 — to the customer, with the priced quote and their link. */
+  async sendQuoteReadyToCustomer(qr: QuoteRequest): Promise<void> {
+    const ref = requestReference(qr.id);
+    const link = `${this.siteUrl()}/quotes/${qr.quoteToken}`;
+    const body =
+      this.greeting(qr) +
+      `<p style="margin:0 0 12px;">Your quote for request <strong>${ref}</strong> is ready.</p>` +
+      (qr.quoteMessage
+        ? `<p style="white-space:pre-line;background:#f5f7f6;border-radius:6px;padding:12px 14px;margin:0 0 14px;">${escapeHtml(qr.quoteMessage)}</p>`
+        : '') +
+      this.quoteTable(qr) +
+      this.requestButton(link, 'View quote & add to cart') +
+      `<p style="margin:0 0 8px;font-size:14px;">Accepting puts the quoted items in your cart at these prices. Then check out as usual — card payment by Stripe. These prices stay valid until you accept or decline.</p>
+       <p style="margin:0;font-size:13px;color:#5b6b70;">Not what you need? You can decline from the same page, or simply reply to this email.</p>`;
+    await this.sendToCustomer(qr, `Your quote ${ref} is ready`, this.requestShell('Your quote is ready.', body, 'Quote'), 'quote ready');
+  }
+
+  /** 6 — to the customer, when the request is closed (by them or by us). */
+  async sendRequestClosedToCustomer(qr: QuoteRequest, byCustomer: boolean): Promise<void> {
+    const ref = requestReference(qr.id);
+    const body =
+      this.greeting(qr) +
+      (byCustomer
+        ? `<p style="margin:0 0 12px;">You declined quote <strong>${ref}</strong>, so we've closed it. Nothing was charged.</p>`
+        : `<p style="margin:0 0 12px;">We've closed your request <strong>${ref}</strong>.</p>`) +
+      (qr.closeReason
+        ? `<p style="white-space:pre-line;background:#f5f7f6;border-radius:6px;padding:12px 14px;margin:0 0 14px;">${escapeHtml(qr.closeReason)}</p>`
+        : '') +
+      `<p style="margin:0 0 12px;font-size:14px;">If you'd still like any of these items, reply to this email or send a new request — we're happy to help.</p>` +
+      this.requestButton(`${this.siteUrl()}/products`, 'Browse ingredients');
+    await this.sendToCustomer(qr, `Your request ${ref} is closed`, this.requestShell('Request closed.', body), 'request closed');
+  }
+
+  /** 4 / 5 / 6 — to staff, when the customer acts on a quote. */
+  async sendQuoteEventToStaff(qr: QuoteRequest, event: 'ACCEPTED' | 'DECLINED' | 'PAID', orderId?: string): Promise<void> {
+    const ref = requestReference(qr.id);
+    const who = `${escapeHtml(qr.fullName)} &lt;${escapeHtml(qr.email)}&gt;${qr.companyName ? ` · ${escapeHtml(qr.companyName)}` : ''} · ${qr.userId ? 'Customer' : 'Guest'}`;
+    const headline = {
+      ACCEPTED: `${qr.fullName} accepted quote ${ref} — the quoted items are in their cart, not yet paid.`,
+      DECLINED: `${qr.fullName} declined quote ${ref}.`,
+      PAID: `Quote ${ref} was paid${orderId ? ` in order #${orderId}` : ''}.`,
+    }[event];
+    const body =
+      `<p style="margin:0 0 6px;">${escapeHtml(headline)}</p>
+       <p style="margin:0 0 14px;font-size:13px;color:#5b6b70;">${who}${qr.destination ? ` · Ship to ${escapeHtml(qr.destination)}` : ''}</p>` +
+      (event === 'DECLINED' && qr.closeReason
+        ? `<p style="white-space:pre-line;background:#f5f7f6;border-radius:6px;padding:12px 14px;margin:0 0 14px;">Reason: ${escapeHtml(qr.closeReason)}</p>`
+        : '') +
+      this.quoteTable(qr) +
+      this.requestButton(`${this.siteUrl()}/admin/quote-requests?open=${qr.id}`, 'Open in admin');
+    const subject = { ACCEPTED: `Quote ${ref} accepted`, DECLINED: `Quote ${ref} declined`, PAID: `Quote ${ref} paid` }[event];
+    await this.sendToRequestStaff(subject, this.requestShell(subject, body, 'Internal'), `quote ${event.toLowerCase()}`);
+  }
+
   private async sendEmail(
     apiKey: string,
     to: string,

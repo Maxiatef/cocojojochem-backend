@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 import axios from 'axios';
 import {
   QuoteRequest,
+  RequestStatus,
   Cart,
   Order,
   OrderItem,
@@ -45,7 +46,9 @@ const DEFAULT_WHOLESALE_MINIMUM = 250;
 // PendingCheckout.itemsJson and turned back into a real OrderItem only once
 // Stripe confirms payment (see finalizeCheckoutFromPendingId).
 interface PendingCheckoutItemSnapshot {
-  productVariantId: string;
+  // Null for a line paid from an accepted quote that has no catalog variant
+  // (a supplier-reference material, or a size we don't list).
+  productVariantId: string | null;
   productName: string;
   variantLabel: string;
   sku: string;
@@ -600,6 +603,48 @@ export class OrdersService {
     return order;
   }
 
+  // Accepted quotes being paid in this checkout: their priced, available
+  // lines become order lines at the quoted price — read from the database,
+  // never from the client. The token is the customer's key to the quote.
+  private async loadPayableQuotes(tokens: string[] | undefined) {
+    const unique = [...new Set((tokens || []).filter(Boolean))];
+    if (!unique.length) return { ids: [] as string[], snapshots: [] as PendingCheckoutItemSnapshot[], shipping: 0 };
+    const quotes = await this.ordersRepo.manager.find(QuoteRequest, {
+      where: { quoteToken: In(unique) },
+      relations: ['items'],
+    });
+    if (quotes.length !== unique.length) {
+      throw new BadRequestException('A quote in your cart could not be found. Please remove it and try again.');
+    }
+    const snapshots: PendingCheckoutItemSnapshot[] = [];
+    let shipping = 0;
+    for (const qr of quotes) {
+      const ref = `CJ-${qr.id.slice(0, 8).toUpperCase()}`;
+      if (qr.quoteOrderId) throw new BadRequestException(`Quote ${ref} has already been paid.`);
+      if (qr.status !== 'QUOTED') {
+        throw new BadRequestException(`Quote ${ref} is no longer open. Please remove it from your cart.`);
+      }
+      if (!qr.acceptedAt) {
+        throw new BadRequestException(`Quote ${ref} isn't in your cart yet — accept it from your quote link first.`);
+      }
+      const lines = qr.items.filter((i) => i.isAvailable && i.quotedPrice != null);
+      if (!lines.length) throw new BadRequestException(`Quote ${ref} has no priced items.`);
+      for (const i of lines) {
+        snapshots.push({
+          productVariantId: null,
+          productName: i.productName,
+          variantLabel: `${i.quotedPackSize || i.unit || 'Quoted'} · quote ${ref}`,
+          sku: i.referenceCode ? i.referenceCode.toUpperCase() : ref,
+          imageUrl: null,
+          quantity: i.quotedQuantity ?? i.quantity ?? 1,
+          price: Number(i.quotedPrice).toFixed(2),
+        });
+      }
+      shipping += qr.quotedShippingCost != null ? Number(qr.quotedShippingCost) : 0;
+    }
+    return { ids: quotes.map((q) => q.id), snapshots, shipping };
+  }
+
   // Combined checkout: the request must be the buyer's own, submitted with
   // `withPayment`, and not already attached to another order. Anything else
   // is refused rather than silently ignored — a wrong id would otherwise link
@@ -637,11 +682,13 @@ export class OrdersService {
         where: { userId },
         relations: ['items', 'items.variant', 'items.variant.product'],
       });
-      if (!cart || cart.items.length === 0) {
+      const quotes = await this.loadPayableQuotes(dto.quoteTokens);
+      const cartItems = cart?.items || [];
+      if (cartItems.length === 0 && quotes.snapshots.length === 0) {
         throw new BadRequestException('Your cart is empty — add some items before checking out.');
       }
 
-      const cartLines = cart.items.map((item) => ({
+      const cartLines = cartItems.map((item) => ({
         variant: item.variant,
         productName: item.variant.product?.name || item.variant.label,
         quantity: item.quantity,
@@ -650,7 +697,7 @@ export class OrdersService {
       this.assertOrderLimits(cartLines);
       this.assertMinimumOrders(cartLines);
 
-      const itemSnapshots: PendingCheckoutItemSnapshot[] = cart.items.map((item) => ({
+      const itemSnapshots: PendingCheckoutItemSnapshot[] = cartItems.map((item) => ({
         productVariantId: item.productVariantId,
         productName: item.variant.product?.name || '',
         variantLabel: item.variant.label,
@@ -664,12 +711,13 @@ export class OrdersService {
         price: getEffectivePrice(item.variant),
         purchaseType: item.purchaseType,
       }));
+      itemSnapshots.push(...quotes.snapshots);
 
       const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
       await this.assertMeetsWholesaleMinimum(subtotal);
 
       const user = await this.usersService.findById(userId);
-      const cartItemsForCoupon = cart.items.map((item) => ({
+      const cartItemsForCoupon = cartItems.map((item) => ({
         productId: item.variant.product?.id,
         variantId: item.productVariantId,
         categoryId: item.variant.product?.categoryId,
@@ -677,7 +725,9 @@ export class OrdersService {
         price: Number(item.price),
       }));
       const couponResult = await this.applyCoupon(dto.couponCode, user.email, subtotal, cartItemsForCoupon);
-      const shippingCost = dto.shippingCost ?? 0;
+      // Quoted shipping is added server-side; the estimate the client sends
+      // only covers catalog items.
+      const shippingCost = (dto.shippingCost ?? 0) + quotes.shipping;
       const taxAmount = await this.computeTax(subtotal);
 
       const quoteRequestId = await this.assertLinkableQuoteRequest(dto.quoteRequestId, {
@@ -689,6 +739,7 @@ export class OrdersService {
         this.pendingCheckoutsRepo.create({
           userId,
           quoteRequestId,
+          quoteRequestIds: quotes.ids.length ? JSON.stringify(quotes.ids) : null,
           itemsJson: JSON.stringify(itemSnapshots),
           subtotal: subtotal.toFixed(2),
           shippingCost: shippingCost.toFixed(2),
@@ -717,18 +768,19 @@ export class OrdersService {
     if (!dto.guestEmail || !dto.guestName) {
       throw new BadRequestException('Email and name are required to check out as a guest.');
     }
-    if (!dto.items || dto.items.length === 0) {
+    const quotes = await this.loadPayableQuotes(dto.quoteTokens);
+    const reqItems = dto.items || [];
+    if (reqItems.length === 0 && quotes.snapshots.length === 0) {
       throw new BadRequestException('Your cart is empty.');
     }
 
-    const variantIds = dto.items.map((i) => i.productVariantId);
-    const variants = await this.variantsRepo.find({
-      where: { id: In(variantIds) },
-      relations: ['product'],
-    });
+    const variantIds = reqItems.map((i) => i.productVariantId);
+    const variants = variantIds.length
+      ? await this.variantsRepo.find({ where: { id: In(variantIds) }, relations: ['product'] })
+      : [];
     const variantsById = new Map(variants.map((v) => [v.id, v]));
 
-    for (const reqItem of dto.items) {
+    for (const reqItem of reqItems) {
       if (!variantsById.has(reqItem.productVariantId)) {
         throw new BadRequestException(
           `One of the items in your cart (variant #${reqItem.productVariantId}) is no longer available. Please remove it and try again.`,
@@ -736,7 +788,7 @@ export class OrdersService {
       }
     }
 
-    const guestLines = dto.items.map((reqItem) => {
+    const guestLines = reqItems.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId)!;
       return {
         variant,
@@ -748,7 +800,7 @@ export class OrdersService {
     this.assertOrderLimits(guestLines);
     this.assertMinimumOrders(guestLines);
 
-    const itemSnapshots: PendingCheckoutItemSnapshot[] = dto.items.map((reqItem) => {
+    const itemSnapshots: PendingCheckoutItemSnapshot[] = reqItems.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId)!;
       return {
         productVariantId: variant.id,
@@ -760,11 +812,12 @@ export class OrdersService {
         price: getEffectivePrice(variant),
       };
     });
+    itemSnapshots.push(...quotes.snapshots);
 
     const subtotal = itemSnapshots.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
     await this.assertMeetsWholesaleMinimum(subtotal);
 
-    const cartItemsForCoupon = dto.items.map((reqItem) => {
+    const cartItemsForCoupon = reqItems.map((reqItem) => {
       const variant = variantsById.get(reqItem.productVariantId);
       return {
         productId: variant?.product?.id,
@@ -775,7 +828,7 @@ export class OrdersService {
       };
     });
     const couponResult = await this.applyCoupon(dto.couponCode, dto.guestEmail, subtotal, cartItemsForCoupon);
-    const shippingCost = dto.shippingCost ?? 0;
+    const shippingCost = (dto.shippingCost ?? 0) + quotes.shipping;
     const taxAmount = await this.computeTax(subtotal);
 
     // Account creation isn't gated on payment — it's not "an order", just an
@@ -826,6 +879,7 @@ export class OrdersService {
       this.pendingCheckoutsRepo.create({
         userId: linkedUserId,
         quoteRequestId,
+        quoteRequestIds: quotes.ids.length ? JSON.stringify(quotes.ids) : null,
         guestEmail: dto.guestEmail,
         guestName: dto.guestName,
         guestPhone: dto.guestPhone ?? null,
@@ -910,13 +964,14 @@ export class OrdersService {
     });
     order = await this.ordersRepo.save(order);
 
-    const variantIds = itemSnapshots.map((i) => i.productVariantId);
-    const variants = await this.variantsRepo.find({ where: { id: In(variantIds) } });
+    // Quote lines have no variant, so no stock to move.
+    const variantIds = itemSnapshots.map((i) => i.productVariantId).filter((id): id is string => !!id);
+    const variants = variantIds.length ? await this.variantsRepo.find({ where: { id: In(variantIds) } }) : [];
     const variantsById = new Map(variants.map((v) => [v.id, v]));
     await this.decrementStock(
       itemSnapshots
-        .filter((item) => variantsById.has(item.productVariantId))
-        .map((item) => ({ variant: variantsById.get(item.productVariantId)!, quantity: item.quantity })),
+        .filter((item) => !!item.productVariantId && variantsById.has(item.productVariantId))
+        .map((item) => ({ variant: variantsById.get(item.productVariantId!)!, quantity: item.quantity })),
     );
 
     if (pending.userId) {
@@ -941,6 +996,28 @@ export class OrdersService {
         { id: pending.quoteRequestId, orderId: IsNull() },
         { orderId: order.id },
       );
+    }
+
+    // Quotes paid in this checkout: mark them paid and won, then tell staff.
+    // Only those not already paid, so a replayed webhook changes nothing.
+    const paidQuoteIds: string[] = pending.quoteRequestIds ? JSON.parse(pending.quoteRequestIds) : [];
+    if (paidQuoteIds.length) {
+      await this.ordersRepo.manager.update(
+        QuoteRequest,
+        { id: In(paidQuoteIds), quoteOrderId: IsNull() },
+        { quoteOrderId: order.id, status: RequestStatus.WON },
+      );
+      const paidQuotes = await this.ordersRepo.manager.find(QuoteRequest, {
+        where: { id: In(paidQuoteIds) },
+        relations: ['items'],
+      });
+      for (const qr of paidQuotes) {
+        try {
+          await this.emailService.sendQuoteEventToStaff(qr, 'PAID', order.id);
+        } catch (err) {
+          this.logger.warn(`Quote-paid staff email failed for ${qr.id}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
     }
 
     await this.pendingCheckoutsRepo.remove(pending);

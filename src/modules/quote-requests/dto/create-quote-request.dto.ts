@@ -95,6 +95,11 @@ export class CreateQuoteRequestDto {
   @Type(() => QuoteRequestItemDto)
   items?: QuoteRequestItemDto[];
 
+  // ORDER = ready to buy (needs a destination); QUOTE = pricing only.
+  @IsOptional()
+  @IsIn(['ORDER', 'QUOTE'])
+  kind?: 'ORDER' | 'QUOTE';
+
   // True when the customer is also paying for priced items in the same
   // checkout; the order is linked to this request once Stripe confirms.
   @IsOptional()

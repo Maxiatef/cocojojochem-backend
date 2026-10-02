@@ -7,12 +7,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { IsEnum } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -20,11 +20,9 @@ import { PermissionGuard } from '../auth/guards/permission.guard';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { QuoteRequestsService } from './quote-requests.service';
 import { CreateQuoteRequestDto } from './dto/create-quote-request.dto';
+import { DeclineQuoteDto, SaveQuoteDto, UpdateStatusDto } from './dto/quote.dto';
 
-class UpdateStatusDto {
-  @IsEnum(RequestStatus)
-  status: RequestStatus;
-}
+
 
 @ApiTags('Quote Requests')
 @Controller('wholesale/quote-requests')
@@ -80,6 +78,50 @@ export class QuoteRequestsController {
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, PermissionGuard)
   updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateStatusDto) {
-    return this.quoteRequestsService.updateStatus(id, dto.status);
+    return this.quoteRequestsService.updateStatus(id, dto.status, dto.reason);
+  }
+
+  // Price the request; `send: true` emails the quote to the customer.
+  @Put(':id/quote')
+  @RequirePermission('canEditQuoteRequest')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  saveQuote(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SaveQuoteDto) {
+    return this.quoteRequestsService.saveQuote(id, dto);
+  }
+}
+
+/**
+ * The customer's side of a quote, reached through the private link in the
+ * quote email (/quotes/<token>). Public: the unguessable token is the key,
+ * so guests can use it without an account.
+ */
+@ApiTags('Quotes')
+@Controller('wholesale/quotes')
+export class QuotesController {
+  constructor(private readonly quoteRequestsService: QuoteRequestsService) {}
+
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get(':token')
+  get(@Param('token') token: string) {
+    return this.quoteRequestsService.getQuoteByToken(token);
+  }
+
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post(':token/accept')
+  accept(@Param('token') token: string) {
+    return this.quoteRequestsService.acceptQuote(token);
+  }
+
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post(':token/unaccept')
+  unaccept(@Param('token') token: string) {
+    return this.quoteRequestsService.unacceptQuote(token);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post(':token/decline')
+  decline(@Param('token') token: string, @Body() dto: DeclineQuoteDto) {
+    return this.quoteRequestsService.declineQuote(token, dto.reason);
   }
 }

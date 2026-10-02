@@ -55,6 +55,11 @@ export class PendingCheckout {
   @Column({ type: 'uuid', nullable: true })
   quoteRequestId: string | null;
 
+  // JSON array of quote request ids whose quoted lines are paid in this
+  // checkout; marked paid (quoteOrderId, WON) by the Stripe webhook.
+  @Column({ type: 'text', nullable: true })
+  quoteRequestIds: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

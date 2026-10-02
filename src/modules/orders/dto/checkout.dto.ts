@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Min, MinLength, ValidateNested } from 'class-validator';
 
 export class CheckoutItemDto {
   @IsUUID('4')
@@ -58,6 +58,15 @@ export class CheckoutDto {
   @IsOptional()
   @IsUUID('4')
   quoteRequestId?: string;
+
+  // Accepted quotes in the cart, by their link token. The server prices
+  // their lines from the quote itself.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @Matches(/^[A-Za-z0-9_-]{20,64}$/, { each: true })
+  quoteTokens?: string[];
 
   // Last shipping cost returned by POST /orders/shipping-estimate for this
   // cart/address — passed through so the actual Stripe charge matches what

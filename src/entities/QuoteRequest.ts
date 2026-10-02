@@ -75,6 +75,42 @@ export class QuoteRequest {
   @Column({ type: 'uuid', nullable: true })
   orderId: string | null;
 
+  // ORDER = the customer gave a delivery address and intends to buy;
+  // QUOTE = pricing only.
+  @Column({ type: 'varchar', length: 16, default: 'QUOTE' })
+  kind: 'ORDER' | 'QUOTE';
+
+  // ---- The quote staff send back (see QuoteRequestsService.saveQuote) ----
+
+  // Unguessable key in the customer's quote link, /quotes/<token>. Set the
+  // first time a quote is sent; quotes do not expire.
+  @Column({ type: 'varchar', length: 64, nullable: true, unique: true })
+  quoteToken: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  quoteMessage: string | null;
+
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  quotedShippingCost: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  quotedAt: Date | null;
+
+  // The customer put the quoted lines in their cart (not yet paid).
+  @Column({ type: 'timestamptz', nullable: true })
+  acceptedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  declinedAt: Date | null;
+
+  // Why the request was closed — the customer's decline reason or staff's note.
+  @Column({ type: 'text', nullable: true })
+  closeReason: string | null;
+
+  // The order the quoted lines were paid in.
+  @Column({ type: 'uuid', nullable: true })
+  quoteOrderId: string | null;
+
   @Column({ type: 'enum', enum: RequestType, default: RequestType.QUOTE })
   type: RequestType;
 
