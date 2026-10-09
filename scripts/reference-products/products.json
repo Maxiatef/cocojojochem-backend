@@ -1,0 +1,155 @@
+[
+  {
+    "slug": "jojoba-oil-clear",
+    "name": "Jojoba Oil · Clear",
+    "inci": "Simmondsia Chinensis (Jojoba) Seed Oil",
+    "category": "Natural oils",
+    "functions": [
+      "Emollient",
+      "Skin conditioning",
+      "Carrier oil"
+    ],
+    "description": "A refined botanical liquid wax for smooth slip in skin, hair and color cosmetic formulations.",
+    "packSizes": [
+      "1 Pail",
+      "1 Drum"
+    ],
+    "packWeightLb": 37,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/jojoba-oil-clear"
+  },
+  {
+    "slug": "jojoba-oil-golden",
+    "name": "Golden Jojoba Oil",
+    "inci": "Simmondsia Chinensis (Jojoba) Seed Oil",
+    "category": "Natural oils",
+    "functions": [
+      "Emollient",
+      "Hair conditioning",
+      "Carrier oil"
+    ],
+    "description": "Golden, unfiltered jojoba liquid wax with natural color and mild aroma.",
+    "packSizes": [
+      "1 Pail",
+      "1 Drum"
+    ],
+    "packWeightLb": 37,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/jojoba-oil-golden"
+  },
+  {
+    "slug": "niacinamide-vitamin-b3",
+    "name": "Niacinamide B3",
+    "inci": "Niacinamide",
+    "category": "Active ingredients",
+    "functions": [
+      "Tone evening",
+      "Skin conditioning",
+      "Active ingredient"
+    ],
+    "description": "Water-soluble vitamin B3 for serum and lotion formulations.",
+    "packSizes": [
+      "44 LB"
+    ],
+    "packWeightLb": 44,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/niacinamide-vitamin-b3"
+  },
+  {
+    "slug": "carbomer-940",
+    "name": "Carbomer 940",
+    "inci": "Carbomer",
+    "category": "Texture builders",
+    "functions": [
+      "Gel formation",
+      "Suspension stabilization",
+      "Rheology modifier"
+    ],
+    "description": "A crosslinked polymer for building viscosity and suspension in gels, serums and gel-creams.",
+    "packSizes": [
+      "44 LB"
+    ],
+    "packWeightLb": 44,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/carbomer-940"
+  },
+  {
+    "slug": "alpha-arbutin",
+    "name": "Alpha Arbutin",
+    "inci": "Alpha-Arbutin",
+    "category": "Active ingredients",
+    "functions": [
+      "Brightening",
+      "Even-tone"
+    ],
+    "description": "A water-soluble active for tone-focused skincare formulations.",
+    "packSizes": [
+      "1 kg"
+    ],
+    "sourceUrl": "https://cocojojo.com/wholesale/product/alpha-arbutin"
+  },
+  {
+    "slug": "eucalyptus-hydrosol",
+    "name": "Eucalyptus Hydrosol",
+    "inci": "Eucalyptus Globulus Leaf Water",
+    "category": "Botanical waters",
+    "functions": [
+      "Scalp conditioning",
+      "Facial refreshing",
+      "Water-phase scenting"
+    ],
+    "description": "Distilled botanical water for mists, toners and other water-phase personal care products.",
+    "packSizes": [
+      "1 Pail",
+      "1 Drum"
+    ],
+    "packWeightLb": 37,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/eucalyptus-hydrosol"
+  },
+  {
+    "slug": "shea-nut-butter-natural",
+    "name": "Shea Nut Butter · Natural",
+    "inci": "Butyrospermum Parkii (Shea) Butter",
+    "category": "Butters & waxes",
+    "functions": [
+      "Emollient",
+      "Balm structuring",
+      "Moisture sealing"
+    ],
+    "description": "Natural, unrefined shea butter for cushion and structure in balms and body butters.",
+    "packSizes": [
+      "44 LB"
+    ],
+    "packWeightLb": 44,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/shea-nut-butter-natural"
+  },
+  {
+    "slug": "sunflower-oil-high-oleic",
+    "name": "Sunflower Oil · High Oleic",
+    "inci": "Helianthus Annuus (Sunflower) Seed Oil",
+    "category": "Natural oils",
+    "functions": [
+      "Emollient",
+      "Oil cleansing",
+      "Skin conditioning"
+    ],
+    "description": "Refined high-oleic sunflower oil with light spread for leave-on, hair and color cosmetic formulations.",
+    "packSizes": [
+      "1 Pail",
+      "1 Drum"
+    ],
+    "packWeightLb": 37,
+    "sourceUrl": "https://cocojojo.com/wholesale/product/sunflower-oil-high-oleic"
+  },
+  {
+    "slug": "jojoba-golden-retail",
+    "name": "Golden Jojoba Oil · Retail",
+    "inci": "Simmondsia Chinensis (Jojoba) Seed Oil",
+    "category": "Natural oils",
+    "functions": [
+      "Emollient",
+      "Carrier oil"
+    ],
+    "description": "Unrefined golden jojoba oil from the official COCOJOJO retail collection. Select the published gallon pack, or ask about another size.",
+    "packSizes": [
+      "1 Gallon"
+    ],
+    "sourceUrl": "https://cocojojo.com/product/jojoba-golden-oil-unrefined"
+  }
+]
