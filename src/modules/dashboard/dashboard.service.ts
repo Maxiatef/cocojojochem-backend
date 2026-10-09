@@ -60,7 +60,7 @@ export class DashboardService {
       this.quoteRequestsRepo.count({ where: { status: RequestStatus.NEW } }),
       this.quoteRequestsRepo.count(),
       this.ordersRepo.count({ where: { status: OrderStatus.PENDING } }),
-      this.subscribersRepo.count(),
+      this.subscribersRepo.count({ where: { status: 'subscribed' } }),
       this.ordersRepo
         .createQueryBuilder('order')
         .select('COALESCE(SUM(order.total), 0)', 'total')

@@ -4,9 +4,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { WorkspaceService } from './workspace.service';
-import { MergeWorkspaceDto, SaveCompareDto, SaveProjectsDto } from './dto/workspace.dto';
+import { MergeWorkspaceDto, SaveCompareDto, SaveProjectsDto, SaveSavedReferencesDto } from './dto/workspace.dto';
 
-// The storefront's comparison list and formulation projects for a signed-in
+// The storefront's comparison list, formulation projects and saved supplier
+// references for a signed-in
 // customer. Own-account only, like the wishlist. The client always sends the
 // whole list, so there are no per-item routes.
 @ApiTags('Workspace')
@@ -39,8 +40,13 @@ export class WorkspaceController {
     return this.workspaceService.saveProjects(req.user.id, dto.projects);
   }
 
+  @Put('saved-references')
+  saveSavedReferences(@Req() req: any, @Body() dto: SaveSavedReferencesDto) {
+    return this.workspaceService.saveSavedReferences(req.user.id, dto.items);
+  }
+
   @Post('merge')
   merge(@Req() req: any, @Body() dto: MergeWorkspaceDto) {
-    return this.workspaceService.merge(req.user.id, dto.compare, dto.projects);
+    return this.workspaceService.merge(req.user.id, dto.compare, dto.projects, dto.savedReferences);
   }
 }

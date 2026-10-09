@@ -40,7 +40,7 @@ export class WorkspaceProjectDto {
 export class SaveCompareDto {
   // Matches COMPARE_LIMIT on the storefront.
   @IsArray()
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(7)
   @ValidateNested({ each: true })
   @Type(() => WorkspaceItemDto)
   items: WorkspaceItemDto[];
@@ -54,10 +54,19 @@ export class SaveProjectsDto {
   projects: WorkspaceProjectDto[];
 }
 
+export class SaveSavedReferencesDto {
+  // Matches the storefront's cap on saved references.
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => WorkspaceItemDto)
+  items: WorkspaceItemDto[];
+}
+
 export class MergeWorkspaceDto {
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
+  @ArrayMaxSize(7)
   @ValidateNested({ each: true })
   @Type(() => WorkspaceItemDto)
   compare?: WorkspaceItemDto[];
@@ -68,4 +77,11 @@ export class MergeWorkspaceDto {
   @ValidateNested({ each: true })
   @Type(() => WorkspaceProjectDto)
   projects?: WorkspaceProjectDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => WorkspaceItemDto)
+  savedReferences?: WorkspaceItemDto[];
 }

@@ -3,8 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CustomerWorkspace, WorkspaceItem, WorkspaceProject } from '../../entities';
 
-const COMPARE_LIMIT = 4;
+const COMPARE_LIMIT = 7;
 const PROJECT_LIMIT = 100;
+const SAVED_REFERENCE_LIMIT = 200;
 
 @Injectable()
 export class WorkspaceService {
@@ -15,7 +16,11 @@ export class WorkspaceService {
 
   async get(userId: string) {
     const row = await this.repo.findOne({ where: { userId } });
-    return { compare: row?.compare ?? [], projects: row?.projects ?? [] };
+    return {
+      compare: row?.compare ?? [],
+      projects: row?.projects ?? [],
+      savedReferences: row?.savedReferences ?? [],
+    };
   }
 
   async saveCompare(userId: string, items: WorkspaceItem[]) {
@@ -28,10 +33,20 @@ export class WorkspaceService {
     return this.get(userId);
   }
 
+  async saveSavedReferences(userId: string, items: WorkspaceItem[]) {
+    await this.repo.upsert({ userId, savedReferences: dedupe(items).slice(0, SAVED_REFERENCE_LIMIT) }, ['userId']);
+    return this.get(userId);
+  }
+
   // Sign-in: fold a guest's browser copy into the account. Comparison items
-  // are unioned up to the limit, account first; projects are matched by id,
+  // and saved references are unioned up to their limits, account first; projects are matched by id,
   // and the more recently edited copy of the same project wins.
-  async merge(userId: string, compare: WorkspaceItem[] = [], projects: WorkspaceProject[] = []) {
+  async merge(
+    userId: string,
+    compare: WorkspaceItem[] = [],
+    projects: WorkspaceProject[] = [],
+    savedReferences: WorkspaceItem[] = [],
+  ) {
     const current = await this.get(userId);
     const mergedCompare = dedupe([...current.compare, ...compare]).slice(0, COMPARE_LIMIT);
 
@@ -44,7 +59,13 @@ export class WorkspaceService {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, PROJECT_LIMIT);
 
-    await this.repo.upsert({ userId, compare: mergedCompare, projects: mergedProjects }, ['userId']);
+    // Saved references: a union, account first, like the wishlist merge.
+    const mergedReferences = dedupe([...current.savedReferences, ...savedReferences]).slice(0, SAVED_REFERENCE_LIMIT);
+
+    await this.repo.upsert(
+      { userId, compare: mergedCompare, projects: mergedProjects, savedReferences: mergedReferences },
+      ['userId'],
+    );
     return this.get(userId);
   }
 }

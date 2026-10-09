@@ -14,7 +14,8 @@ export interface WorkspaceProject {
   updatedAt: string;
 }
 
-// A signed-in customer's comparison list and formulation projects, so they
+// A signed-in customer's comparison list, formulation projects and saved
+// supplier references, so they
 // follow the account across devices. Guests keep both in localStorage
 // (src/lib/gloss/stores.ts in the frontend) and merge them in on sign-in.
 //
@@ -31,6 +32,11 @@ export class CustomerWorkspace {
 
   @Column({ type: 'jsonb', default: () => "'[]'" })
   projects: WorkspaceProject[];
+
+  // Wishlist entries for supplier-reference materials (slug + name). The
+  // account wishlist is keyed by catalog product id, which references lack.
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  savedReferences: WorkspaceItem[];
 
   @UpdateDateColumn()
   updatedAt: Date;
