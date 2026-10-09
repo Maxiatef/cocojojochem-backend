@@ -18,7 +18,8 @@
     "migration:generate": "npm run typeorm -- migration:generate",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
-    "test": "jest"
+    "test": "jest",
+    "db:reference-products": "node scripts/reference-products/replace-products.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.4",

@@ -9,3 +9,6 @@ uploads/**/*
 # (already ignored), but a build with a different outDir puts one at the
 # repo root, so match it wherever it appears.
 *.tsbuildinfo
+
+# JSON backups written by scripts/reference-products (contain customer data)
+db-backups/
